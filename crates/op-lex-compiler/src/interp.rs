@@ -151,6 +151,15 @@ fn eval_expr(
             other => other,
         },
 
+        OpExpr::Seq(a, b) => {
+            // Evaluate `a` for its effect — the host call or effectful sub-expression
+            // is invoked, its value discarded. Then evaluate `b` and return.
+            match eval_expr(a, env, host, jurisdiction) {
+                EvalResult::Value(_) => eval_expr(b, env, host, jurisdiction),
+                err @ EvalResult::Error(_) => err,
+            }
+        }
+
         OpExpr::Call(name, args) => {
             let mut call_args = BTreeMap::new();
             for (k, e) in args {

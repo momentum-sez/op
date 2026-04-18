@@ -43,6 +43,18 @@ pub enum AdmissibilityViolation {
         /// Detail (e.g. "missing branch for `Individual`").
         detail: String,
     },
+
+    /// Defeasible-rule exceptions fail to form a total order on
+    /// `(priority DESC, source_position ASC)`. Two exceptions sharing the
+    /// same `(priority, source_position)` pair are observationally
+    /// indistinguishable by the defeasible resolution rule, which would
+    /// leave the compiled program under-determined.
+    DefeasibleOrderNotTotal {
+        /// Colliding priority.
+        priority: u32,
+        /// Colliding source position.
+        source_position: u32,
+    },
 }
 
 /// Compilation failure.

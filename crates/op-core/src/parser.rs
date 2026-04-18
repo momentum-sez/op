@@ -160,7 +160,7 @@ fn validate_expr(expr: &OpExpr) -> Result<(), OpError> {
             }
             Ok(())
         }
-        OpExpr::BinOp(_, a, b) | OpExpr::Coalesce(a, b) => {
+        OpExpr::BinOp(_, a, b) | OpExpr::Coalesce(a, b) | OpExpr::Seq(a, b) => {
             validate_expr(a)?;
             validate_expr(b)
         }
