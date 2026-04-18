@@ -14,3 +14,8 @@ tracing = { workspace = true }
 
 [dev-dependencies]
 proptest = { workspace = true }
+criterion = { workspace = true }
+
+[[bench]]
+name = "op_pipeline"
+harness = false
