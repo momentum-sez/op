@@ -1,0 +1,49 @@
+op entity.incorporate for sc
+version "0.1.0"
+description "Minimum entity-incorporation workflow for a single jurisdiction."
+
+inputs {
+  legal_name: String,
+  entity_type: String,
+  treasury_currency: String
+}
+
+outputs {
+  entity_id: EntityId,
+  treasury_id: String
+}
+
+effects {
+  sanctions_check;
+  sovereign_write;
+}
+
+contracts {
+  requires domains [corporate, sanctions];
+  ensures  domains [corporate];
+}
+
+do {
+  step entity_create : { legal_name: String, entity_type: String, jurisdiction: JurisdictionId }
+    -> { id: EntityId } ! {sovereign_write}
+    create.entity({ name: legal_name, entityType: entity_type, jurisdiction: "sc" });
+
+  run treasury = create.treasury({
+    entity_id: entity_create.id,
+    currency: treasury_currency
+  });
+
+  run account = create.bank_account({
+    entity_id: entity_create.id,
+    treasury_id: treasury.id,
+    account_type: "checking",
+    currency: treasury_currency
+  });
+
+  run activate = update.entity_status({
+    entity_id: entity_create.id,
+    status: "ACTIVE"
+  });
+
+  return { entity_id: entity_create.id, treasury_id: treasury.id };
+}

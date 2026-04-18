@@ -1,0 +1,69 @@
+op trade.letter_of_credit for singapore
+version "0.1.0"
+description "Bilateral cross-zone trade finance with explicit sanctions gate and SAVM-backed proof."
+
+inputs {
+  seller_id: EntityId,
+  buyer_id: EntityId,
+  issuing_bank: String,
+  goods_description: String,
+  total_amount: MoneyAmount,
+  currency: String,
+  expiry_date: Date
+}
+
+participants {
+  seller: SourceZone(seller_id);
+  buyer: DestinationZone(buyer_id);
+}
+approval bilateral;
+
+effects {
+  sanctions_check;
+  fiscal_transfer;
+  sovereign_write;
+}
+
+contracts {
+  requires domains [trade, sanctions, banking];
+  ensures  domains [trade, banking, tax];
+}
+
+do {
+  in seller_zone {
+    run seller_verification = check.entity_registration({ entity_id: seller_id });
+  }
+  in buyer_zone {
+    run buyer_sanctions = screening.sanctions({ subject_id: buyer_id });
+  }
+
+  run invoice_generation = trade.invoice_create({
+    seller: seller_id,
+    buyer: buyer_id,
+    total: { currency: currency, value: total_amount },
+    goods_description: goods_description
+  });
+
+  run lc_issuance = trade.lc_issue({
+    applicant: buyer_id,
+    beneficiary: seller_id,
+    amount: { currency: currency, value: total_amount },
+    issuing_bank: issuing_bank,
+    expiry_date: expiry_date
+  });
+
+  par {
+    invoice_document = document.commercial_invoice({ reference_id: invoice_generation.invoice_id });
+    duty_assessment = tax.customs_duty_assessment({
+      entity_id: seller_id,
+      gross_amount: total_amount,
+      currency: currency
+    });
+  }
+
+  policy trade_gate using savm {
+    prove domains [trade, sanctions, banking, tax];
+  }
+
+  return { invoice_id: invoice_generation.invoice_id, lc_id: lc_issuance.lc_id };
+}

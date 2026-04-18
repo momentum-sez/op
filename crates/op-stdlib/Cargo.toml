@@ -1,0 +1,12 @@
+[package]
+name = "op-stdlib"
+description = "Op standard library — canonical primitive corpus describing the shapes of institutional workflow primitives"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+op-core = { path = "../op-core" }
+serde = { workspace = true }
+serde_json = { workspace = true }
