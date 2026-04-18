@@ -215,6 +215,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "op-lex-compiler"
+version = "0.1.0"
+dependencies = [
+ "op-compiler",
+ "op-core",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "op-stdlib"
 version = "0.1.0"
 dependencies = [
