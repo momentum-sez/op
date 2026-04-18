@@ -1,18 +1,83 @@
 # Op Language Reference
 
+## 1. What Op Is
+
 Op is a typed effectful workflow language for multi-step economic programs.
-The language makes step composition explicit, gives steps typed inputs and
-outputs, tracks operational effects statically, attaches compensation to the
-forward program it inverts, exposes proof obligations as first-class
-constructs, and lowers deterministically to an execution plan.
+A program names its inputs and outputs, composes a DAG of typed steps, and
+declares the operational effects those steps impose on sovereign state. A
+host fulfills the primitive calls. The language carries the scaffolding:
+parsing, typing, effect safety, gas accounting, and deterministic replay.
 
-This reference is the canonical public statement of the language.
+**The promise.** A program that type-checks composes correctly, accounts
+for its effects, preserves its compensation scope, and lowers
+deterministically to an execution plan. Same program + same inputs + same
+host → same trace on every replay.
 
-## 1. Core Concepts
+**What it replaces.** Workflow definitions encoded in YAML or JSON carry
+language semantics — step composition through `depends_on` edges, variable
+binding through string-path interpolation, control flow through embedded
+expression fragments, suspension through callback tokens, failure policy
+through ad hoc enumerations, compensation detached from the step it
+inverts. Op makes these language features instead of string conventions.
 
-An Op program denotes one executable operation family. Its canonical identity
-is the pair `(operation_type, jurisdiction)` — the same pair used by the
-lowered execution plan.
+### Instruction set at a glance
+
+| Surface | What it is |
+|---|---|
+| `step name : In -> Out ! E { body }` | Smallest named unit; typed input, output, and effect row. |
+| `a ; b` | Sequential composition; later steps see earlier bindings. |
+| `par { a = e1; b = e2; }` | Parallel branches; no sibling data-dependence. |
+| `choose { when cond -> ... else -> ... }` | Guarded choice; all arms unify to a common output. |
+| `await e within d` | Typed callback suspension; the step's result is `Await<e, T>`. |
+| `compensate { ... }` | Inverse branch attached to the forward step. |
+| `in jurisdiction { ... }` | Ambient-jurisdiction rebind inside a scope. |
+| `policy name using backend { prove domains [...] }` | SAVM-style proof block; the host backs the verifier. |
+| `requires domains [...]; ensures domains [...];` | Contract clauses consumed by the rule layer. |
+
+Nine tracked effects — `sovereign_write`, `identity_mutation`,
+`fiscal_transfer`, `sanctions_check`, `governance_request`,
+`document_generation`, `external_read`, `proof_emit`,
+`await <event>` — compose by union. Any reachable write-class effect
+(`sovereign_write`, `identity_mutation`, `fiscal_transfer`) must be
+dominated by a `sanctions_check`, with one narrow deferred-subject
+exception for entity creation.
+
+### A two-line example
+
+```op
+op entity.activate for _default
+do {
+  step gate : EntityId -> Bool ! {sanctions_check}
+    screening.sanctions({ subject_id: entity_id });
+  step activate : { entity_id: EntityId } -> { status: String } ! {sovereign_write}
+    update.entity_status({ entity_id: entity_id, status: "ACTIVE" });
+}
+```
+
+The `gate` step carries `sanctions_check`; it dominates the downstream
+`activate` write. Remove the gate and the type checker rejects the
+program before any primitive runs.
+
+### What comes next in this document
+
+Sections 2–13 are the full reference: core concepts, the type system,
+the effect system, contracts, compensation, multi-entity operations,
+jurisdiction resolution, the two-tier gas model, policy blocks, the
+host ABI, the EBNF grammar, and worked examples.
+
+### Getting started hands-on
+
+The fastest way to see Op run: `cargo run --example hello-op -p op-core`
+from a fresh clone. A cold-reader five-minute walk-through lives at
+`docs/getting-started.md`.
+
+---
+
+## 2. Core Concepts
+
+An Op program denotes one executable operation family. Its canonical
+identity is the pair `(operation_type, jurisdiction)` — the same pair used
+by the lowered execution plan.
 
 The semantic core has four objects: **steps**, **primitives**,
 **compensation**, and **composition**.
@@ -39,7 +104,7 @@ outputs, ambient jurisdiction, time-derived extras, and caller identity. The
 important change relative to string-interpolated workflow configuration is
 that bindings become typed names instead of string paths.
 
-## 2. Type System
+## 3. Type System
 
 Op is statically typed. The typing judgment is
 
@@ -109,7 +174,7 @@ String interpolation survives as `"${name}"` inside literal strings, but it
 occurs after typing — the referenced bindings must exist and have resolvable
 types.
 
-## 3. Effect System
+## 4. Effect System
 
 Type safety is necessary but not sufficient. A program can be type-correct
 and still operationally unsafe. Op therefore tracks effects.
@@ -147,7 +212,7 @@ The compiler rejects programs that:
 **Effect inference.** Default effect rows are inferred from primitive
 families. A host may override the defaults for its embedding.
 
-## 4. Contracts
+## 5. Contracts
 
 A step or program may declare preconditions (`requires`) and postconditions
 (`ensures`). Contracts are attached to the program or step and are discharged
@@ -167,7 +232,7 @@ Domain shorthand references compliance domains the host recognizes. The
 language itself assigns no semantics to a specific domain name; it carries
 the shorthand through to the host layer.
 
-## 5. Compensation
+## 6. Compensation
 
 Compensation mirrors the execution semantics of long-running economic
 workflows: it is reverse-topological, step-idempotent, best-effort across
@@ -187,7 +252,7 @@ multiple inverse actions, and persisted after each successful inverse.
   its compensation clause. Attestation records whose domains overlap the
   declared set are marked revoked by the host when the rollback runs.
 
-## 6. Multi-Entity Operations
+## 7. Multi-Entity Operations
 
 Op has first-class support for operations with more than one participating
 entity. Participants declare their role, entity, and governance
@@ -211,7 +276,7 @@ the most restrictive participant's verdict wins. The language enforces that
 the host's composition is honored in the step ordering; it does not
 prescribe the lattice.
 
-## 7. Jurisdiction Resolution
+## 8. Jurisdiction Resolution
 
 Every Op program has one ambient jurisdiction. The ambient jurisdiction
 participates in registry resolution, obligation selection, and host
@@ -236,7 +301,7 @@ in buyer_zone  { ... }
 The compiler must preserve the scope faithfully. Silent erasure of a
 semantically relevant jurisdiction switch is forbidden.
 
-## 8. Gas
+## 9. Gas
 
 Op has a two-tier gas model.
 
@@ -253,7 +318,7 @@ Op has a two-tier gas model.
 A host embedder may replace the structural cost table to match its
 deployment economics.
 
-## 9. Policy Blocks
+## 10. Policy Blocks
 
 Some hosts expose a proof backend (a virtual machine that compiles a policy
 and verifies its satisfaction against host state). Op represents these
@@ -269,7 +334,33 @@ The policy block is a language-level annotation. The host compiles and
 evaluates it through its own proof backend; Op does not prescribe the
 backend.
 
-## 10. Grammar
+## 11. Host ABI
+
+Every side effect flows through the `OpHost` trait supplied by
+`op-core::host`. A host implements:
+
+```rust
+fn invoke(&self, call: &PrimitiveCall) -> Result<HostOutcome, HostError>;
+fn canonicalize_jurisdiction(&self, raw: &str) -> String;
+fn discharge_safety(
+    &self,
+    predicate: &SafetyPredicate,
+    context: &serde_json::Value,
+) -> Result<(), HostError>;
+```
+
+`PrimitiveCall` carries the primitive name, reduced JSON arguments, and
+the ambient jurisdiction. `HostOutcome` is either `Completed(Value)` or
+`Waiting { event, resume_token }`. A deterministic host returns the same
+outcome for the same call on every replay; replay verification depends on
+this property.
+
+A `NoopHost` ships in the crate for tests and examples — it echoes every
+call as a deterministic JSON record. A production embedding replaces
+`NoopHost` with a kernel-backed host that executes primitives against
+sovereign state.
+
+## 12. Grammar
 
 The following EBNF is intentionally compact. It is concrete enough to parse
 and define the user-facing surface.
@@ -349,13 +440,20 @@ string_list    = "[", string, { ",", string }, "]" ;
 duration       = integer, ("d" | "h" | "m" | "s") ;
 ```
 
-## 11. Worked Examples
+## 13. Worked Examples
 
-Two worked examples ship under `examples/`:
+Four worked examples ship with the repository:
 
-- `incorporate.op` — minimum entity incorporation for a single jurisdiction.
-- `letter-of-credit.op` — bilateral cross-zone trade finance with
-  scoped jurisdiction blocks and a policy block.
+- `crates/op-core/examples/hello-op.rs` — a 60-second cold-reader tour:
+  parse, typecheck, execute, render a compliance-carrying verdict.
+- `crates/op-core/examples/compliance-gate.rs` — a rule-aware host
+  denying a transfer when the counterparty jurisdiction is sanctioned
+  and the amount exceeds a low-value threshold; shows the proof
+  certificate shape.
+- `examples/incorporate.op` — minimum entity incorporation for a
+  single jurisdiction.
+- `examples/letter-of-credit.op` — bilateral cross-zone trade finance
+  with scoped jurisdiction blocks and a policy block.
 
-Both examples compile against the canonical primitive corpus in
-`op-stdlib`.
+The `.op` surface-syntax examples compile against the canonical primitive
+corpus in `op-stdlib`.
