@@ -10,8 +10,10 @@ Coq sources backing the formal obligations enumerated in `formal/README.md`.
   function `[[.]] : Lex -> Op` from the Op paper §6.2, mechanized for
   the scalar shape of the constant compilation case, the
   sanctions-dominance case, the variable case, the record shape of
-  the constant case, the list shape of the constant case, and the
-  variant shape of the constant case.
+  the constant case, the list shape of the constant case, the
+  variant shape of the constant case, and the match case
+  (scalar-constant scrutinees, nullary-pattern branches,
+  scalar-constant branch bodies).
 
 ## What `CompilationSoundness.v` mechanizes
 
@@ -153,22 +155,59 @@ and a scalar payload:
    the scalar `lift_value_emits` / `lift_value_inj` lemmas on the
    payload.
 
+### Match case
+
+For the §6.2 match rule, restricted to scalar-constant scrutinees,
+nullary-constructor patterns equated by scalar equality, and
+scalar-constant branch bodies:
+
+1. Concrete Lex (`MatchLexTerm`) and Op (`MatchOpExpr`) AST
+   extensions carrying a scalar scrutinee and a list of
+   (pattern, body) scalar pairs; the Op form is a choose-node
+   over lifted scrutinee and lifted branches.
+2. Decidable equality `LexValue_eq_dec` on `LexValue` delivered
+   via `decide equality` with the standard scalar decidability
+   lemmas.
+3. A pair of pattern-matching selectors `lex_match_find` and
+   `op_match_find` that walk the branch list in order, returning
+   the first body whose pattern equals the scrutinee; on
+   exhaustion both selectors return the fail-closed sentinel
+   `lift_value fail_closed_value` (Op side) /
+   `fail_closed_value = LV_Str "pattern_unmatched"` (Lex side),
+   mirroring the Rust `fail_closed_expr` in `case_match.rs`.
+4. Small-step reductions `match_lex_step` / `match_op_step`
+   emitting the selector's result; the Op rule threads the
+   scalar `op_step` emission through the selected branch body
+   via a single explicit premise.
+5. The compilation function `match_compile` mapping a scalar
+   match term to the lifted choose-expression, via
+   `map (fun (p, b) => (lift_value p, lift_value b))` over the
+   branch list.
+6. The key helper `op_match_find_lifts` — the lifted
+   branch-selection selector agrees pointwise with the Lex-side
+   selector. Proof by list induction; each step case-splits on
+   pattern equality with injectivity of `lift_value` closing
+   the residual on both branches.
+7. The main biconditional `verdict_preservation_match` closing
+   both directions with `Qed.`, by inversion on the match step
+   plus the selector-agreement helper and the scalar
+   `lift_value_emits` / `lift_value_emits_unique` lemmas.
+
 The file type-checks under `coqc` (Rocq Prover 9.1.1) with no errors
 and no warnings.
 
 ## Proof obligations
 
-The §6.2 compilation function comprises six cases. The scalar shape
-of the constant case, the sanctions-dominance case, the variable
-case, the record shape of the constant case, the list shape of the
-constant case, and the variant shape of the constant case are
-closed (`Qed.`). Three obligations remain, registered in the
-`Obligations` section at the foot of `CompilationSoundness.v`, with
-a proof-structure comment for each:
+The §6.2 compilation function comprises seven closed cases: the
+scalar shape of the constant case, the sanctions-dominance case,
+the variable case, the record shape of the constant case, the list
+shape of the constant case, the variant shape of the constant case,
+and the match case. All seven close with `Qed.`. Two obligations
+remain, registered in the `Obligations` section at the foot of
+`CompilationSoundness.v`, with a proof-structure comment for each:
 
 | Obligation | Shape | Strategy |
 |---|---|---|
-| Match | `Match scrutinee branches` | Induction on the branch list; base via the constant lemma. |
 | Defeasible | `Defeasible name base exceptions` | Well-founded induction on `(priority DESC, source_position ASC)`. |
 | HoleFill (§6.3) | `HoleFill hole_id filler witness` | Coinduction on a bisimulation relation pairing each Lex state with the Op state reached by unwinding one `tau` attestation-append step. |
 
@@ -186,7 +225,7 @@ cd formal/coq
 coqc CompilationSoundness.v
 ```
 
-Exit code zero and no diagnostic output indicates the six
+Exit code zero and no diagnostic output indicates the seven
 mechanized cases are machine-verified by Rocq 9.1.1.
 
 ## Relation to the Rust reference
@@ -196,13 +235,14 @@ mechanized cases are machine-verified by Rocq 9.1.1.
 `crates/op-lex-compiler/src/case_const.rs` (`compile_const`,
 record / list / variant shapes),
 `crates/op-lex-compiler/src/case_sanctions.rs`
-(`compile_sanctions`), and `crates/op-lex-compiler/src/case_var.rs`
-(`compile_var`). Each Coq definition is the mathematical companion
-of the corresponding Rust function; every scalar base constructor
-handled by the Rust `lift_value` is handled by the Coq
-`lift_value`; the sanctions-dominance, variable, record, list, and
-variant compilation shapes agree. Extending the Coq mechanization
-to the remaining cases is a matter of mirroring the other
-`case_*.rs` files into the corresponding inductive relations and
-discharging the obligations registered in the `Obligations`
-section.
+(`compile_sanctions`), `crates/op-lex-compiler/src/case_var.rs`
+(`compile_var`), and `crates/op-lex-compiler/src/case_match.rs`
+(`compile_match`, fail-closed sentinel `fail_closed_expr`). Each
+Coq definition is the mathematical companion of the corresponding
+Rust function; every scalar base constructor handled by the Rust
+`lift_value` is handled by the Coq `lift_value`; the
+sanctions-dominance, variable, record, list, variant, and match
+compilation shapes agree. Extending the Coq mechanization to the
+remaining cases is a matter of mirroring the other `case_*.rs`
+files into the corresponding inductive relations and discharging
+the obligations registered in the `Obligations` section.

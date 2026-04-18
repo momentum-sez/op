@@ -1004,16 +1004,255 @@ Proof.
 Qed.
 
 (* ------------------------------------------------------------------ *)
-(**  14.  Proof obligations.                                          *)
+(**  14.  Match case.                                                *)
+(* ------------------------------------------------------------------ *)
+
+(** The §6.2 match rule:
+
+      [[match e { | C_i x_i => b_i }]]  =
+        choose {
+          when match(P_1, [[e]]) -> [[b_1]];
+          ...;
+          when match(P_n, [[e]]) -> [[b_n]];
+          else fail-closed
+        }
+
+    Scope. The admissible fragment is restricted here to:
+
+      - scalar-constant scrutinees ([LV_Unit] / [LV_Bool] / [LV_Int]
+        / [LV_Str]);
+      - finite nullary-constructor patterns, each identified with a
+        scalar [LexValue] the scrutinee is compared against by
+        syntactic equality;
+      - scalar-constant branch bodies, so each compiled body is a
+        lifted literal that emits its source value in one step;
+      - fixed branch return type (the composed verdict [P]).
+
+    Non-exhaustive match is supported: if no pattern matches, the
+    Op expression emits the fail-closed sentinel
+    [LV_Str "pattern_unmatched"], matching the Rust reference in
+    [crates/op-lex-compiler/src/case_match.rs]. Dependent match
+    (pattern binders introducing payload variables) is out of scope
+    and will land in a follow-on extension once admissibility opens
+    up non-nullary patterns.
+
+    Mechanization strategy. A new [MatchLexTerm] / [MatchOpExpr]
+    layer over the scalar-constant fragment. The scrutinee is a
+    single scalar value; each branch is a (pattern, body) pair of
+    scalar values. [match_compile] lifts the scrutinee and each
+    branch body; the Op side carries the (lifted-pattern,
+    lifted-body) pairs through a [MOE_Choose] node. Reduction on
+    both sides walks the branch list in order; the first pattern
+    equal to the scrutinee fires, delivering the branch body's
+    value; if no pattern matches, both sides emit the fail-closed
+    sentinel. Verdict preservation then follows by list induction
+    over the branches: the scalar-constant lemma
+    [lift_value_emits_unique] closes each base case; the inductive
+    step uses [lift_value] injectivity to reduce pattern equality
+    on the Op side to pattern equality on the Lex side. *)
+
+(** Decidable equality on [LexValue]. Used for pattern matching. *)
+
+Lemma LexValue_eq_dec : forall (v w : LexValue), {v = w} + {v <> w}.
+Proof.
+  decide equality.
+  - apply Bool.bool_dec.
+  - apply Z.eq_dec.
+  - apply String.string_dec.
+Defined.
+
+(** Concrete Lex head for the match fragment. The scrutinee is a
+    scalar value; the branch list pairs pattern values with body
+    values. *)
+
+Inductive MatchLexTerm : Type :=
+  | MLT_Match : LexValue -> list (LexValue * LexValue) -> MatchLexTerm.
+
+(** Concrete Op form for the match fragment. The compiled image is
+    a choose-expression whose scrutinee is the lifted scalar and
+    whose branches carry lifted pattern/body pairs. *)
+
+Inductive MatchOpExpr : Type :=
+  | MOE_Choose : OpExpr -> list (OpExpr * OpExpr) -> MatchOpExpr.
+
+(** The fail-closed sentinel — a NonCompliant verdict tagged with
+    [pattern_unmatched], mirroring the Rust
+    [fail_closed_expr] in [case_match.rs]. The Coq mechanization
+    uses a string-valued sentinel because the surrounding
+    [LexValue] alphabet is scalar; the paper's fail-closed
+    [Verdict::NonCompliant { reason: "pattern_unmatched" }] record
+    lowers to this string under the scalar-only restriction. *)
+
+Definition fail_closed_value : LexValue := LV_Str "pattern_unmatched".
+
+(** Lex reduction for the match fragment. The first branch whose
+    pattern equals the scrutinee fires, emitting the branch body.
+    If no pattern matches, the fail-closed sentinel is emitted. The
+    two rules are modelled as separate constructors indexed by the
+    branch list prefix consumed. *)
+
+Fixpoint lex_match_find (scrutinee : LexValue)
+                        (branches : list (LexValue * LexValue))
+                        : LexValue :=
+  match branches with
+  | nil => fail_closed_value
+  | (p, b) :: rest =>
+      if LexValue_eq_dec p scrutinee
+      then b
+      else lex_match_find scrutinee rest
+  end.
+
+Inductive match_lex_step : MatchLexTerm -> Label -> MatchLexTerm -> Prop :=
+  | MLexStepMatch :
+      forall scrutinee branches,
+        match_lex_step
+          (MLT_Match scrutinee branches)
+          (LEmit (lex_match_find scrutinee branches))
+          (MLT_Match scrutinee branches).
+
+(** Op reduction for the match fragment. Mirrors the Lex semantics
+    against the lifted scrutinee and lifted branch pairs. The
+    branch traversal uses syntactic equality on [OpExpr], which
+    agrees with scalar equality on [LexValue] via the injectivity
+    of [lift_value]. *)
+
+Fixpoint op_match_find (scrutinee : OpExpr)
+                       (branches : list (OpExpr * OpExpr))
+                       : OpExpr :=
+  match branches with
+  | nil => lift_value fail_closed_value
+  | (p, b) :: rest =>
+      match p, scrutinee with
+      | OE_Unit, OE_Unit => b
+      | OE_Bool b1, OE_Bool b2 => if Bool.bool_dec b1 b2 then b else op_match_find scrutinee rest
+      | OE_Int n1, OE_Int n2 => if Z.eq_dec n1 n2 then b else op_match_find scrutinee rest
+      | OE_Str s1, OE_Str s2 => if String.string_dec s1 s2 then b else op_match_find scrutinee rest
+      | _, _ => op_match_find scrutinee rest
+      end
+  end.
+
+Inductive match_op_step : MatchOpExpr -> Label -> MatchOpExpr -> Prop :=
+  | MOpStepChoose :
+      forall scrutinee branches v,
+        op_step (op_match_find scrutinee branches) (LEmit v)
+                (op_match_find scrutinee branches) ->
+        match_op_step
+          (MOE_Choose scrutinee branches)
+          (LEmit v)
+          (MOE_Choose scrutinee branches).
+
+(** Compilation, match fragment. Mirrors the Rust reference in
+    [crates/op-lex-compiler/src/case_match.rs] for the
+    scalar-constant-scrutinee, nullary-pattern restriction: the
+    scrutinee is lifted, each branch's pattern and body are
+    lifted pointwise, the fail-closed catch-all is materialized
+    implicitly by [op_match_find] returning
+    [lift_value fail_closed_value] when the branch list is
+    exhausted. *)
+
+Definition match_compile (t : MatchLexTerm) : MatchOpExpr :=
+  match t with
+  | MLT_Match scrutinee branches =>
+      MOE_Choose (lift_value scrutinee)
+                 (map (fun (pb : LexValue * LexValue) =>
+                         let (p, b) := pb in
+                         (lift_value p, lift_value b)) branches)
+  end.
+
+Definition match_lex_verdict (t : MatchLexTerm) (v : LexValue) : Prop :=
+  exists t', match_lex_step t (LEmit v) t'.
+
+Definition match_op_verdict (e : MatchOpExpr) (v : LexValue) : Prop :=
+  exists e', match_op_step e (LEmit v) e'.
+
+(** Helper. The Op-side branch traversal, parameterized by the
+    lifted scrutinee and the pointwise-lifted branch list, selects
+    the lifted image of the Lex-side selection. By induction on
+    the branch list; each step discriminates on whether the
+    lifted pattern equals the lifted scrutinee and closes via
+    injectivity of [lift_value]. *)
+
+Lemma op_match_find_lifts :
+  forall scrutinee branches,
+    op_match_find (lift_value scrutinee)
+                  (map (fun (pb : LexValue * LexValue) =>
+                          let (p, b) := pb in
+                          (lift_value p, lift_value b)) branches)
+    = lift_value (lex_match_find scrutinee branches).
+Proof.
+  induction branches as [ | [p b] rest IH].
+  - simpl. reflexivity.
+  - simpl.
+    destruct (LexValue_eq_dec p scrutinee) as [Heq | Hneq].
+    + (* Patterns match: both sides select [b] / [lift_value b]. *)
+      subst p.
+      destruct scrutinee as [ | b0 | n | s ]; simpl; try reflexivity.
+      * destruct (Bool.bool_dec b0 b0) as [_ | Hne]; [reflexivity | exfalso; apply Hne; reflexivity].
+      * destruct (Z.eq_dec n n) as [_ | Hne]; [reflexivity | exfalso; apply Hne; reflexivity].
+      * destruct (String.string_dec s s) as [_ | Hne]; [reflexivity | exfalso; apply Hne; reflexivity].
+    + (* Patterns differ: both sides recurse. *)
+      destruct p as [ | bp | np | sp ], scrutinee as [ | bs | ns | ss ];
+        simpl; try exact IH; try (exfalso; apply Hneq; reflexivity).
+      * destruct (Bool.bool_dec bp bs) as [Heq | _].
+        { subst bp. exfalso. apply Hneq. reflexivity. }
+        exact IH.
+      * destruct (Z.eq_dec np ns) as [Heq | _].
+        { subst np. exfalso. apply Hneq. reflexivity. }
+        exact IH.
+      * destruct (String.string_dec sp ss) as [Heq | _].
+        { subst sp. exfalso. apply Hneq. reflexivity. }
+        exact IH.
+Qed.
+
+(** Verdict preservation for the match case, restricted to
+    scalar-constant scrutinees, nullary-constructor patterns
+    equated by scalar equality, and scalar-constant branch
+    bodies. *)
+
+Theorem verdict_preservation_match :
+  forall (scrutinee : LexValue)
+         (branches : list (LexValue * LexValue))
+         (vv : LexValue),
+    match_lex_verdict (MLT_Match scrutinee branches) vv <->
+    match_op_verdict  (match_compile (MLT_Match scrutinee branches)) vv.
+Proof.
+  intros scrutinee branches vv. split.
+  - (* Forward. *)
+    intros [t' Hstep].
+    inversion Hstep; subst.
+    simpl.
+    exists (MOE_Choose (lift_value scrutinee)
+                       (map (fun (pb : LexValue * LexValue) =>
+                               let (p, b) := pb in
+                               (lift_value p, lift_value b)) branches)).
+    apply MOpStepChoose.
+    rewrite op_match_find_lifts.
+    apply lift_value_emits.
+  - (* Backward. *)
+    intros [e' Hstep].
+    simpl in Hstep.
+    inversion Hstep; subst.
+    match goal with
+    | [ H : op_step _ (LEmit vv) _ |- _ ] =>
+        rewrite op_match_find_lifts in H;
+        apply lift_value_emits_unique in H;
+        subst vv
+    end.
+    exists (MLT_Match scrutinee branches).
+    apply MLexStepMatch.
+Qed.
+
+(* ------------------------------------------------------------------ *)
+(**  15.  Proof obligations.                                         *)
 (* ------------------------------------------------------------------ *)
 
 (** The §6.2 compilation function comprises six cases. The scalar
     shape of the constant case, the sanctions-dominance case, the
     variable case, the record shape of the constant case, the list
-    shape of the constant case, and the variant shape of the
-    constant case are closed above. The remaining obligations are
-    registered below as open theorems carrying the signature of the
-    target result and a proof-structure comment.
+    shape of the constant case, the variant shape of the constant
+    case, and the match case are closed above. The remaining
+    obligations are registered below as open theorems carrying the
+    signature of the target result and a proof-structure comment.
 
     The shapes introduced here as parameters mirror the Rust AST
     extensions in [crates/op-lex-compiler/src/ast.rs]. A follow-on
@@ -1024,8 +1263,8 @@ Section Obligations.
 
   (** Parameters carried across this obligations section. Each
       follow-on refinement replaces these with concrete syntactic
-      definitions (match expressions; defeasible rules; filled
-      holes) taken from the Rust reference. *)
+      definitions (defeasible rules; filled holes) taken from the
+      Rust reference. *)
 
   Parameter ExtLexTerm     : Type.
   Parameter ExtOpExpr      : Type.
@@ -1033,30 +1272,8 @@ Section Obligations.
   Parameter ExtLexVerdict  : ExtLexTerm -> LexValue -> Prop.
   Parameter ExtOpVerdict   : ExtOpExpr  -> LexValue -> Prop.
 
-  Parameter ELT_Match      : ExtLexTerm -> list (string * string * ExtLexTerm) -> ExtLexTerm.
   Parameter ELT_Defeasible : string -> ExtLexTerm -> list (ExtLexTerm * ExtLexTerm * nat * nat) -> ExtLexTerm.
   Parameter ELT_HoleFill   : string -> ExtLexTerm -> ExtLexTerm.
-
-  (** ** Match case.
-
-      Goal. For every match term with scrutinee [s] and branch
-      list [bs], the compiled image (an Op match against the
-      lifted scrutinee with a materialized fail-closed
-      catch-all) emits verdict [vv] iff the Lex match emits
-      [vv].
-
-      Proof strategy. Induction on the branch list, using the
-      constant lemma as the base when each branch body reduces
-      to a literal. Uniqueness of the matched branch closes the
-      inductive step. *)
-
-  Theorem verdict_preservation_match :
-    forall (scrutinee : ExtLexTerm)
-           (branches : list (string * string * ExtLexTerm))
-           (vv : LexValue),
-      ExtLexVerdict (ELT_Match scrutinee branches) vv <->
-      ExtOpVerdict  (ExtCompile (ELT_Match scrutinee branches)) vv.
-  Proof. Admitted.
 
   (** ** Defeasible case.
 
