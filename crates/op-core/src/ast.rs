@@ -629,6 +629,80 @@ pub struct CardinalityCertificate {
 }
 
 // ---------------------------------------------------------------------------
+// Outcome — the terminal set of program evaluation (§4.13)
+// ---------------------------------------------------------------------------
+
+/// Program-level terminal outcome.
+///
+/// Per the Op paper §4.13 "Terminal set", every reduction from a typed
+/// initial configuration under a finite gas budget reaches exactly one of
+/// seven terminals. `Outcome` encodes that enumeration at the type level:
+/// any pattern match on `Outcome` that forgets a variant is a compile-time
+/// error. The enum is the machine-checkable witness that the terminal set
+/// has cardinality seven.
+///
+/// 1. `Value` — reduction completed with a result value.
+/// 2. `Paused` — evaluation suspended on a callback event; the resume token
+///    is carried in the variant payload.
+/// 3. `Halted` — host or runtime aborted the program on a named reason
+///    (non-gas, non-sanctions termination).
+/// 4. `SanctionsBlocked` — a dominating sanctions gate rejected the
+///    program's principal; no further reduction.
+/// 5. `OutOfStructuralGas` — the static structural budget was exhausted.
+/// 6. `OutOfCompensationGas` — the compensation-reserve budget was
+///    exhausted while executing an inverse path.
+/// 7. `Timeout` — an `await` exceeded its declared `within` duration.
+///
+/// The variants are payload-carrying so the terminal is self-describing;
+/// downstream callers read the payload for the specific diagnostic they
+/// need without re-inspecting the program.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Outcome {
+    /// Reduction completed with a result value (serialized as JSON for
+    /// host portability).
+    Value(serde_json::Value),
+    /// Execution is paused on a callback event `(event, resume_token)`.
+    Paused {
+        /// Callback event identifier.
+        event: String,
+        /// Opaque resume token for the runtime to continue evaluation.
+        resume_token: String,
+    },
+    /// Program halted with a named reason (non-gas, non-sanctions).
+    Halted {
+        /// Human-readable halt reason.
+        reason: String,
+    },
+    /// A sanctions gate rejected the dominating principal.
+    SanctionsBlocked {
+        /// Principal identifier that was blocked.
+        principal: String,
+    },
+    /// Structural gas exhaustion.
+    OutOfStructuralGas {
+        /// Structural gas consumed at the point of failure.
+        used: u64,
+        /// Configured structural-gas limit.
+        limit: u64,
+    },
+    /// Compensation gas exhaustion.
+    OutOfCompensationGas {
+        /// Compensation gas consumed at the point of failure.
+        used: u64,
+        /// Configured compensation-gas reserve.
+        limit: u64,
+    },
+    /// An `await` exceeded its declared duration.
+    Timeout {
+        /// Event identifier the program was awaiting.
+        event: String,
+        /// Timeout in seconds, as declared in the `await`.
+        timeout_secs: u64,
+    },
+}
+
+// ---------------------------------------------------------------------------
 // Compositional safety predicates
 // ---------------------------------------------------------------------------
 
