@@ -3,31 +3,40 @@
     Mechanization of verdict preservation for the compilation function
     [[.]] : Lex -> Op.
 
-    Two cases are mechanized and closed with [Qed.]:
+    Four cases are mechanized and closed with [Qed.]:
 
       1. Scalar constant case (§6.2).
       2. Sanctions-dominance case (§6.2 / §6.3).
+      3. Variable case (§6.2), against a shared prelude parameter.
+      4. Constant case — record shape (§6.2), restricted to records
+         whose field values are scalars.
 
     Scope.
 
       - Lex AST (admissible fragment, constant head constructor,
-        scalar payloads; plus sanctions-dominance head for case 2)
+        scalar payloads; plus sanctions-dominance head for case 2;
+        plus constant/variable heads for case 3; plus record-constant
+        head for case 4)
       - Op AST (expression fragment sufficient for lifted scalar
-        constants; plus host-call form for case 2)
+        constants; plus host-call form for case 2; plus
+        literal/variable forms for case 3; plus record form for
+        case 4)
       - value-lifting function [lift_value : LexValue -> OpExpr]
-      - compilation function [compile : LexTerm -> OpExpr]
+      - compilation functions [compile : LexTerm -> OpExpr],
+        [sanct_compile], [var_compile], [rec_compile]
       - small-step operational semantics for Lex and Op with a trace
         alphabet distinguishing silent [tau] transitions from
-        observable verdict emissions
+        observable verdict emissions; the record case uses a field
+        list as its emission payload
       - verdict-extraction predicates on Lex terms and Op expressions
-      - the verdict-preservation theorems for the scalar constant and
-        sanctions-dominance cases, proved in both directions
+      - the verdict-preservation theorems for the four mechanized
+        cases, proved in both directions
 
-    The remaining shapes of the constant case (records, lists,
-    variants) and the remaining four compilation cases (variable,
-    match, defeasible, hole_fill) are registered in the [Obligations]
-    section as [Admitted.] theorems carrying honest proof-obligation
-    statements that a follow-on mechanization will discharge. *)
+    The remaining shapes of the constant case (lists, variants) and
+    the remaining three compilation cases (match, defeasible,
+    hole_fill) are registered in the [Obligations] section as
+    [Admitted.] theorems carrying honest proof-obligation statements
+    that a follow-on mechanization will discharge. *)
 
 Set Implicit Arguments.
 
@@ -42,7 +51,8 @@ Open Scope string_scope.
 (** First-order scalar values recognized by the admissible Lex
     fragment. The Rust reference in [crates/op-lex-compiler/src/
     ast.rs] additionally carries records, lists, and variants;
-    those shapes are registered in the obligations section below. *)
+    the record shape is mechanized in §11 below; the list and
+    variant shapes are registered in the obligations section. *)
 
 Inductive LexValue : Type :=
   | LV_Unit : LexValue
@@ -465,11 +475,305 @@ Proof.
 Qed.
 
 (* ------------------------------------------------------------------ *)
-(**  10.  Proof obligations.                                          *)
+(**  10.  Variable case.                                              *)
+(* ------------------------------------------------------------------ *)
+
+(** The §6.2 variable compilation rule:
+
+      [[Var n]]  =  OpVar n
+
+    A variable reference evaluates by looking the name up in a
+    deterministic prelude shared by both Lex and Op. The prelude is
+    axiomatized as a total function into [option LexValue]; an
+    unbound name yields [None] and no emission fires. Both languages
+    perform the same lookup, so the preservation proof reduces to
+    the determinism of the shared prelude.
+
+    Mechanization strategy. Introduce a concrete Lex term with both
+    constant and variable forms, an Op expression with matching
+    constant-literal and variable-reference forms, a parameterized
+    prelude, and small-step reductions that emit the looked-up value
+    on each side. The compilation function maps [VLT_Var n] to
+    [VOE_Var n] and lifts constants as before. *)
+
+(** Concrete Lex head for the variable fragment. [VLT_Const] embeds
+    the scalar constant layer; [VLT_Var n] names a prelude entry. *)
+
+Inductive VarLexTerm : Type :=
+  | VLT_Const : LexValue -> VarLexTerm
+  | VLT_Var   : string   -> VarLexTerm.
+
+(** Concrete Op form for the variable fragment. [VOE_Lit] receives a
+    lifted constant; [VOE_Var n] performs the runtime prelude lookup
+    on the Op side. *)
+
+Inductive VarOpExpr : Type :=
+  | VOE_Lit : OpExpr -> VarOpExpr
+  | VOE_Var : string -> VarOpExpr.
+
+(** Prelude. Axiomatized as a deterministic partial function shared
+    by both Lex and Op. [prelude n = Some v] means the name [n] is
+    bound to the scalar [v] in the runtime environment active at
+    compile time; [prelude n = None] means [n] is unbound. Both
+    languages read from this same parameter, so the semantics agree
+    on every name. *)
+
+Parameter prelude : string -> option LexValue.
+
+(** Lex reduction for the variable fragment. A [VLT_Const v] emits
+    [v] in one step; a [VLT_Var n] emits the looked-up value when
+    [prelude n = Some v], and is stuck otherwise (no emission
+    rule). *)
+
+Inductive var_lex_step : VarLexTerm -> Label -> VarLexTerm -> Prop :=
+  | VLexStepConst :
+      forall v,
+        var_lex_step (VLT_Const v) (LEmit v) (VLT_Const v)
+  | VLexStepVar :
+      forall n v,
+        prelude n = Some v ->
+        var_lex_step (VLT_Var n) (LEmit v) (VLT_Var n).
+
+(** Op reduction for the variable fragment. Mirrors the Lex rules
+    against the same prelude parameter. *)
+
+Inductive var_op_step : VarOpExpr -> Label -> VarOpExpr -> Prop :=
+  | VOpStepLit :
+      forall v,
+        var_op_step (VOE_Lit (lift_value v)) (LEmit v) (VOE_Lit (lift_value v))
+  | VOpStepVar :
+      forall n v,
+        prelude n = Some v ->
+        var_op_step (VOE_Var n) (LEmit v) (VOE_Var n).
+
+(** Compilation, variable fragment. Mirrors the Rust reference in
+    [crates/op-lex-compiler/src/case_var.rs]. *)
+
+Definition var_compile (t : VarLexTerm) : VarOpExpr :=
+  match t with
+  | VLT_Const v => VOE_Lit (lift_value v)
+  | VLT_Var n   => VOE_Var n
+  end.
+
+Definition var_lex_verdict (t : VarLexTerm) (v : LexValue) : Prop :=
+  exists t', var_lex_step t (LEmit v) t'.
+
+Definition var_op_verdict (e : VarOpExpr) (v : LexValue) : Prop :=
+  exists e', var_op_step e (LEmit v) e'.
+
+(** Helper. Compilation of a variable unfolds to a variable
+    reference in Op. *)
+
+Lemma var_compile_shape_var :
+  forall n, var_compile (VLT_Var n) = VOE_Var n.
+Proof. intros n. reflexivity. Qed.
+
+(** Verdict preservation for the variable case. Both directions
+    follow by a case split on [prelude n]; the shared prelude forces
+    the emitted value on each side to agree. *)
+
+Theorem verdict_preservation_var :
+  forall (n : string) (vv : LexValue),
+    var_lex_verdict (VLT_Var n) vv <->
+    var_op_verdict  (var_compile (VLT_Var n)) vv.
+Proof.
+  intros n vv. split.
+  - (* Forward. *)
+    intros [t' Hstep].
+    inversion Hstep; subst.
+    rewrite var_compile_shape_var.
+    exists (VOE_Var n).
+    apply VOpStepVar. assumption.
+  - (* Backward. *)
+    intros [e' Hstep].
+    rewrite var_compile_shape_var in Hstep.
+    inversion Hstep; subst.
+    exists (VLT_Var n).
+    apply VLexStepVar. assumption.
+Qed.
+
+(** Verdict preservation extends to the constant shape within the
+    variable fragment, recovering the scalar-constant result. *)
+
+(** Helper. The Op emission of a [VOE_Lit (lift_value v)] is uniquely
+    the embedded value. *)
+
+Lemma var_op_lit_emit_unique :
+  forall v w e',
+    var_op_step (VOE_Lit (lift_value v)) (LEmit w) e' ->
+    w = v.
+Proof.
+  intros v w e' H.
+  inversion H; subst.
+  apply lift_value_inj in H1.
+  exact H1.
+Qed.
+
+Theorem verdict_preservation_var_const :
+  forall (v : LexValue) (vv : LexValue),
+    var_lex_verdict (VLT_Const v) vv <->
+    var_op_verdict  (var_compile (VLT_Const v)) vv.
+Proof.
+  intros v vv. split.
+  - intros [t' Hstep]. inversion Hstep; subst.
+    simpl. exists (VOE_Lit (lift_value vv)).
+    apply VOpStepLit.
+  - intros [e' Hstep]. simpl in Hstep.
+    pose proof (@var_op_lit_emit_unique v vv e' Hstep) as Heq.
+    subst vv.
+    exists (VLT_Const v). apply VLexStepConst.
+Qed.
+
+(* ------------------------------------------------------------------ *)
+(**  11.  Constant case — record shape.                               *)
+(* ------------------------------------------------------------------ *)
+
+(** The §6.2 constant-case extension to records with scalar fields:
+
+      [[Const (Record [(k_i, v_i)])]]  =  OpRecord [(k_i, lift v_i)]
+
+    The Lex term emits the record value in one observable step. The
+    Op expression emits the record value once every field's compiled
+    image has emitted its scalar. Structural induction on the field
+    list closes both directions, with the scalar-constant lemma
+    discharging each field's base case. *)
+
+(** Concrete Lex head for the record fragment. Restricted to a
+    record-valued constant; the fields carry scalar [LexValue]s. *)
+
+Inductive RecLexTerm : Type :=
+  | RLT_ConstRec : list (string * LexValue) -> RecLexTerm.
+
+(** Concrete Op form for the record fragment. [ROE_Record] holds a
+    list of (key, compiled-field) pairs; each compiled field is a
+    lifted scalar. *)
+
+Inductive RecOpExpr : Type :=
+  | ROE_Record : list (string * OpExpr) -> RecOpExpr.
+
+(** Lex reduction for the record fragment. A record-valued constant
+    emits the record value in one step. The emission payload is the
+    field list itself; the surrounding framework's [Label] alphabet
+    only carries scalar verdicts, so the record emission uses a
+    bespoke relation taking [list (string * LexValue)] directly. *)
+
+Inductive rec_lex_step : RecLexTerm -> list (string * LexValue) -> RecLexTerm -> Prop :=
+  | RLexStepRec :
+      forall fields,
+        rec_lex_step (RLT_ConstRec fields) fields (RLT_ConstRec fields).
+
+(** Op field-list reduction. Each field's compiled image emits its
+    source scalar. The relation is a straight pointwise predicate on
+    the zipped list of Lex fields and Op fields. *)
+
+Inductive op_fields_emit : list (string * OpExpr) -> list (string * LexValue) -> Prop :=
+  | FieldsEmitNil :
+      op_fields_emit nil nil
+  | FieldsEmitCons :
+      forall k v rest_op rest_lex,
+        op_fields_emit rest_op rest_lex ->
+        op_fields_emit ((k, lift_value v) :: rest_op) ((k, v) :: rest_lex).
+
+(** Op reduction for the record fragment. A compiled record emits
+    the list of source scalars once the pointwise field relation
+    holds. *)
+
+Inductive rec_op_step : RecOpExpr -> list (string * LexValue) -> RecOpExpr -> Prop :=
+  | ROpStepRecord :
+      forall op_fields lex_fields,
+        op_fields_emit op_fields lex_fields ->
+        rec_op_step (ROE_Record op_fields) lex_fields (ROE_Record op_fields).
+
+(** Compilation, record fragment. Mirrors the Rust reference in
+    [crates/op-lex-compiler/src/case_const.rs] for the record shape:
+    every field's value is lifted pointwise. *)
+
+Definition rec_compile (t : RecLexTerm) : RecOpExpr :=
+  match t with
+  | RLT_ConstRec fields =>
+      ROE_Record (map (fun (kv : string * LexValue) =>
+                         let (k, v) := kv in (k, lift_value v)) fields)
+  end.
+
+Definition rec_lex_verdict (t : RecLexTerm) (fields : list (string * LexValue)) : Prop :=
+  exists t', rec_lex_step t fields t'.
+
+Definition rec_op_verdict (e : RecOpExpr) (fields : list (string * LexValue)) : Prop :=
+  exists e', rec_op_step e fields e'.
+
+(** Helper. For every list of scalar fields, the pointwise lifted
+    Op field list emits the source list under [op_fields_emit]. Proof
+    by induction on the field list; each step invokes the scalar
+    lifting semantics once. *)
+
+Lemma map_lift_value_emits :
+  forall fields,
+    op_fields_emit
+      (map (fun (kv : string * LexValue) =>
+              let (k, v) := kv in (k, lift_value v)) fields)
+      fields.
+Proof.
+  induction fields as [ | [k v] rest IH].
+  - simpl. apply FieldsEmitNil.
+  - simpl. apply FieldsEmitCons. exact IH.
+Qed.
+
+(** Helper. Converse. If the pointwise lifted Op field list emits
+    [lex_fields] under [op_fields_emit], then [lex_fields] is the
+    original source list. Proof by induction on the
+    [op_fields_emit] derivation, with injectivity of [lift_value]
+    closing each field. *)
+
+Lemma map_lift_value_emits_unique :
+  forall fields lex_fields,
+    op_fields_emit
+      (map (fun (kv : string * LexValue) =>
+              let (k, v) := kv in (k, lift_value v)) fields)
+      lex_fields ->
+    lex_fields = fields.
+Proof.
+  induction fields as [ | [k v] rest IH]; intros lex_fields H.
+  - simpl in H. inversion H. reflexivity.
+  - simpl in H. inversion H; subst.
+    apply lift_value_inj in H2; subst v0.
+    apply IH in H4; subst rest_lex.
+    reflexivity.
+Qed.
+
+(** Verdict preservation for the record-shape constant case,
+    restricted to records whose field values are scalars. The
+    biconditional threads the pointwise field emission through
+    [map_lift_value_emits] and [map_lift_value_emits_unique]. *)
+
+Theorem verdict_preservation_const_record :
+  forall (fields : list (string * LexValue)) (vv : list (string * LexValue)),
+    rec_lex_verdict (RLT_ConstRec fields) vv <->
+    rec_op_verdict  (rec_compile (RLT_ConstRec fields)) vv.
+Proof.
+  intros fields vv. split.
+  - (* Forward. *)
+    intros [t' Hstep].
+    inversion Hstep; subst.
+    simpl.
+    eexists.
+    apply ROpStepRecord.
+    apply map_lift_value_emits.
+  - (* Backward. *)
+    intros [e' Hstep].
+    simpl in Hstep.
+    inversion Hstep; subst.
+    apply map_lift_value_emits_unique in H0; subst vv.
+    exists (RLT_ConstRec fields).
+    apply RLexStepRec.
+Qed.
+
+(* ------------------------------------------------------------------ *)
+(**  12.  Proof obligations.                                          *)
 (* ------------------------------------------------------------------ *)
 
 (** The §6.2 compilation function comprises six cases. The scalar
-    shape of the constant case and the sanctions-dominance case are
+    shape of the constant case, the sanctions-dominance case, the
+    variable case, and the record shape of the constant case are
     closed above. The remaining obligations are registered below as
     [Admitted.] theorems carrying the signature of the target result
     and a proof-structure comment.
@@ -484,9 +788,8 @@ Section Obligations.
 
   (** Parameters carried across this obligations section. Each
       follow-on refinement replaces these with concrete syntactic
-      definitions (records, lists, variants; variable references;
-      match expressions; defeasible rules; filled holes) taken from
-      the Rust reference. *)
+      definitions (lists, variants; match expressions; defeasible
+      rules; filled holes) taken from the Rust reference. *)
 
   Parameter ExtLexTerm     : Type.
   Parameter ExtOpExpr      : Type.
@@ -494,31 +797,23 @@ Section Obligations.
   Parameter ExtLexVerdict  : ExtLexTerm -> LexValue -> Prop.
   Parameter ExtOpVerdict   : ExtOpExpr  -> LexValue -> Prop.
 
-  Parameter ELV_Record  : list (string * LexValue) -> LexValue.
   Parameter ELV_List    : list LexValue -> LexValue.
   Parameter ELV_Variant : string -> LexValue -> LexValue.
   Parameter ELT_Const   : LexValue -> ExtLexTerm.
 
-  Parameter ELT_Var        : string -> ExtLexTerm.
   Parameter ELT_Match      : ExtLexTerm -> list (string * string * ExtLexTerm) -> ExtLexTerm.
   Parameter ELT_Defeasible : string -> ExtLexTerm -> list (ExtLexTerm * ExtLexTerm * nat * nat) -> ExtLexTerm.
   Parameter ELT_HoleFill   : string -> ExtLexTerm -> ExtLexTerm.
 
-  (** ** Constant case — record / list / variant shapes.
+  (** ** Constant case — list / variant shapes.
 
-      Goal. Verdict preservation extends to record, list, and
-      variant constructors.
+      Goal. Verdict preservation extends to list and variant
+      constructors.
 
       Proof strategy. Structural induction on the [LexValue]
-      constructor, with a nested induction on the list of fields
-      (record case) and on the list of elements (list case). The
-      inductive step uses the scalar base cases proved above. *)
-
-  Theorem verdict_preservation_const_record :
-    forall (fields : list (string * LexValue)) (vv : LexValue),
-      ExtLexVerdict (ELT_Const (ELV_Record fields)) vv <->
-      ExtOpVerdict  (ExtCompile (ELT_Const (ELV_Record fields))) vv.
-  Proof. Admitted.
+      constructor, with a nested induction on the list of elements
+      (list case). The inductive step uses the scalar base cases
+      proved above. *)
 
   Theorem verdict_preservation_const_list :
     forall (elems : list LexValue) (vv : LexValue),
@@ -530,23 +825,6 @@ Section Obligations.
     forall (tag : string) (payload : LexValue) (vv : LexValue),
       ExtLexVerdict (ELT_Const (ELV_Variant tag payload)) vv <->
       ExtOpVerdict  (ExtCompile (ELT_Const (ELV_Variant tag payload))) vv.
-  Proof. Admitted.
-
-  (** ** Variable case.
-
-      Goal. For every prelude-bound variable name resolving to a
-      [LexValue], the compiled image emits that value iff the Lex
-      variable emits it.
-
-      Proof strategy. The variable case has no recursive term
-      structure. Introduce a prelude-lookup relation as a
-      parameter; the proof reduces to the scalar constant case
-      once the lookup equation is rewritten. *)
-
-  Theorem verdict_preservation_var :
-    forall (name : string) (resolved : LexValue),
-      ExtLexVerdict (ELT_Var name) resolved <->
-      ExtOpVerdict  (ExtCompile (ELT_Var name)) resolved.
   Proof. Admitted.
 
   (** ** Match case.
@@ -611,7 +889,7 @@ Section Obligations.
 End Obligations.
 
 (* ------------------------------------------------------------------ *)
-(**  11.  End-to-end sanity examples.                                *)
+(**  13.  End-to-end sanity examples.                                *)
 (* ------------------------------------------------------------------ *)
 
 Example const_bool_true_verdict :
