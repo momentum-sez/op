@@ -180,6 +180,16 @@ pub struct CompileCtx {
     pub gas_budget: GasBudget,
     /// Program name for the emitted program.
     pub program_name: String,
+    /// Branch-scoped binders: constructor payload bindings introduced by
+    /// pattern matches, threaded through the branch body so the compiler's
+    /// downstream cases (type inference, admissibility, prelude lookup)
+    /// see the constructor-local names.
+    ///
+    /// The admissible fragment today uses nullary constructors — the map
+    /// is vacuous in practice. When dependent match becomes admissible,
+    /// each match arm will push its binder here before compiling the
+    /// arm body, and pop it when the body finishes.
+    pub binders: BTreeMap<String, OpType>,
 }
 
 impl CompileCtx {
@@ -190,6 +200,26 @@ impl CompileCtx {
             jurisdiction: Jurisdiction::default_(),
             gas_budget: GasBudget::default(),
             program_name: program_name.to_string(),
+            binders: BTreeMap::new(),
         }
+    }
+
+    /// Extend the context with constructor-payload binders for a match arm.
+    ///
+    /// The returned `CompileCtx` owns a fresh binder map that shadows the
+    /// parent's bindings for the duration of the arm body's compilation.
+    /// Callers should compile the arm body against the returned value and
+    /// discard it — binders do NOT escape the arm.
+    pub fn with_binders(&self, new_binders: Vec<(String, OpType)>) -> Self {
+        let mut extended = self.clone();
+        for (name, ty) in new_binders {
+            extended.binders.insert(name, ty);
+        }
+        extended
+    }
+
+    /// Look up a binder introduced by an enclosing match arm.
+    pub fn lookup_binder(&self, name: &str) -> Option<&OpType> {
+        self.binders.get(name)
     }
 }
