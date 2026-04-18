@@ -1,5 +1,11 @@
 # Op
 
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![CI](https://github.com/momentum-sez/op/actions/workflows/ci.yml/badge.svg)](https://github.com/momentum-sez/op/actions/workflows/ci.yml)
+[![Coq](https://github.com/momentum-sez/op/actions/workflows/coq.yml/badge.svg)](https://github.com/momentum-sez/op/actions/workflows/coq.yml)
+[![Release](https://img.shields.io/badge/release-0.1.0-orange.svg)](https://github.com/momentum-sez/op/releases)
+[![Rust](https://img.shields.io/badge/rust-1.84.0-brown.svg)](rust-toolchain.toml)
+
 Op is a typed, stack-based bytecode and deterministic operational semantics for
 compliance-carrying operations in sovereign institutional kernels. An Op
 program is a directed acyclic graph of typed steps with an explicit effect
@@ -127,6 +133,14 @@ into an Op boolean expression, a Lex defeasible rule compiles into a guarded
 `ensures domains` declaration. Op does not re-interpret Lex semantics at
 runtime; compilation is content-addressed and version-pinned at authoring
 time. Lex lives at <https://github.com/momentum-sez/lex>.
+
+## Reproducibility
+
+See [`REPRODUCIBILITY.md`](REPRODUCIBILITY.md) for the exact toolchain pin,
+expected test counts, example outputs, and hardware budgets. The repository
+ships with a pinned Rust toolchain (`rust-toolchain.toml`), GitHub Actions
+CI for Rust and Rocq, and a self-contained workspace that compiles from a
+cold clone without sibling checkouts.
 
 ## Contributing
 
