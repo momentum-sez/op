@@ -62,8 +62,8 @@ pub mod types;
 pub use ast::{
     ApprovalMode, BinOp, CardinalityCertificate, CompensationClause, Contract, Contracts, Effect,
     ExprNode, FailureAction, GasBudget, GovernanceRequirement, MatchArm, OpExpr, OpProgram,
-    OpStep, OpType, Participant, ParticipantRole, Primitive, ProgramMetadata, SafetyPredicate,
-    Statement, StepBody, StepSig, StepSignature, UnOp, WaitSpec,
+    OpStep, OpType, Outcome, Participant, ParticipantRole, Primitive, ProgramMetadata,
+    SafetyPredicate, Statement, StepBody, StepSig, StepSignature, UnOp, WaitSpec,
 };
 pub use effects::{EffectRow, EffectSafetyError, check_effect_safety};
 pub use error::OpError;
