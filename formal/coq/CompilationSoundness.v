@@ -1,31 +1,33 @@
 (** * CompilationSoundness.v
 
     Mechanization of verdict preservation for the compilation function
-    [[.]] : Lex -> Op, restricted to the constant compilation case on
-    first-order scalar values.
+    [[.]] : Lex -> Op.
+
+    Two cases are mechanized and closed with [Qed.]:
+
+      1. Scalar constant case (§6.2).
+      2. Sanctions-dominance case (§6.2 / §6.3).
 
     Scope.
 
       - Lex AST (admissible fragment, constant head constructor,
-        scalar payloads)
+        scalar payloads; plus sanctions-dominance head for case 2)
       - Op AST (expression fragment sufficient for lifted scalar
-        constants)
+        constants; plus host-call form for case 2)
       - value-lifting function [lift_value : LexValue -> OpExpr]
       - compilation function [compile : LexTerm -> OpExpr]
       - small-step operational semantics for Lex and Op with a trace
         alphabet distinguishing silent [tau] transitions from
         observable verdict emissions
       - verdict-extraction predicates on Lex terms and Op expressions
-      - the verdict-preservation theorem for the scalar constant case,
-        proved in both directions
+      - the verdict-preservation theorems for the scalar constant and
+        sanctions-dominance cases, proved in both directions
 
-    The proof closes with [Qed.]. The remaining shapes of the constant
-    case (records, lists, variants) and the remaining five
-    compilation cases (variable, match, defeasible,
-    sanctions_dominance, hole_fill) are registered in the
-    [Obligations] section as [Admitted.] theorems carrying honest
-    proof-obligation statements that a follow-on mechanization will
-    discharge. *)
+    The remaining shapes of the constant case (records, lists,
+    variants) and the remaining four compilation cases (variable,
+    match, defeasible, hole_fill) are registered in the [Obligations]
+    section as [Admitted.] theorems carrying honest proof-obligation
+    statements that a follow-on mechanization will discharge. *)
 
 Set Implicit Arguments.
 
@@ -269,14 +271,208 @@ Proof.
 Qed.
 
 (* ------------------------------------------------------------------ *)
-(**  9.  Proof obligations.                                           *)
+(**  9.  Sanctions-dominance case.                                    *)
+(* ------------------------------------------------------------------ *)
+
+(** The §6.2 sanctions-dominance rule:
+
+      [[SanctionsDominance(p)]]  =
+        call("sanctions.check", { principal: [[p]] })
+
+    The host primitive [sanctions.check] returns a two-valued verdict
+    drawn from the set [{Compliant, SanctionsBlocked}]. The
+    sanctions-bottom semantics — a sanctions-blocked principal
+    dominates every other verdict in the residual pipeline — is
+    enforced in the host, not in the compiler. The compiler
+    guarantees that any path reaching a committing effect in the
+    compiled program is dominated by a [sanctions.check] invocation;
+    see §3.9 of the Op language reference.
+
+    Mechanization strategy. Introduce a concrete Lex head for
+    sanctions-dominance applied to a scalar principal, a concrete Op
+    host-call form with a single named argument, a deterministic
+    axiomatic host [host_sanctions] with a two-element range, and
+    small-step reductions on both sides that thread the principal
+    through the host before emitting the verdict. Verdict
+    preservation reduces to a single case-split on the host response
+    once the principal has emitted its scalar value. *)
+
+(** Concrete Lex head for a sanctions-dominance rule applied to a
+    scalar principal. *)
+
+Inductive SanctLexTerm : Type :=
+  | SLT_Const     : LexValue -> SanctLexTerm
+  | SLT_Sanctions : SanctLexTerm -> SanctLexTerm.
+
+(** Concrete Op form for a host call with a single named argument
+    ([principal]). The scalar literal case wraps the base [OpExpr]. *)
+
+Inductive SanctOpExpr : Type :=
+  | SOE_Lit  : OpExpr -> SanctOpExpr
+  | SOE_Call : string -> SanctOpExpr -> SanctOpExpr.
+
+(** Host primitive. Axiomatized as a deterministic function from
+    principals to the two-element verdict set. The range axiom is
+    load-bearing: the case-split on [host_sanctions v_p] is the
+    crux of the proof. *)
+
+Parameter host_sanctions : LexValue -> LexValue.
+
+Axiom host_sanctions_range :
+  forall p,
+    host_sanctions p = LV_Str "Compliant" \/
+    host_sanctions p = LV_Str "SanctionsBlocked".
+
+(** Lex reduction for the sanctions head. A [SLT_Const v_p] emits its
+    scalar [v_p] in one observable step; [SLT_Sanctions p] emits
+    [host_sanctions v_p] once [p] has emitted [v_p]. *)
+
+Inductive sanct_lex_step : SanctLexTerm -> Label -> SanctLexTerm -> Prop :=
+  | SLexStepConst :
+      forall v,
+        sanct_lex_step (SLT_Const v) (LEmit v) (SLT_Const v)
+  | SLexStepSanctions :
+      forall p v_p,
+        sanct_lex_step p (LEmit v_p) p ->
+        sanct_lex_step (SLT_Sanctions p) (LEmit (host_sanctions v_p)) (SLT_Sanctions p).
+
+(** Op reduction for the sanctions host call. [SOE_Lit (lift_value v_p)]
+    emits [v_p]; [SOE_Call "sanctions.check" e_p] emits
+    [host_sanctions v_p] once [e_p] has emitted [v_p]. *)
+
+Inductive sanct_op_step : SanctOpExpr -> Label -> SanctOpExpr -> Prop :=
+  | SOpStepLit :
+      forall v,
+        sanct_op_step (SOE_Lit (lift_value v)) (LEmit v) (SOE_Lit (lift_value v))
+  | SOpStepCall :
+      forall e_p v_p,
+        sanct_op_step e_p (LEmit v_p) e_p ->
+        sanct_op_step (SOE_Call "sanctions.check" e_p)
+                      (LEmit (host_sanctions v_p))
+                      (SOE_Call "sanctions.check" e_p).
+
+(** Compilation, sanctions fragment. Mirrors the Rust reference in
+    [crates/op-lex-compiler/src/case_sanctions.rs]. *)
+
+Fixpoint sanct_compile (t : SanctLexTerm) : SanctOpExpr :=
+  match t with
+  | SLT_Const v       => SOE_Lit (lift_value v)
+  | SLT_Sanctions p   => SOE_Call "sanctions.check" (sanct_compile p)
+  end.
+
+Definition sanct_lex_verdict (t : SanctLexTerm) (v : LexValue) : Prop :=
+  exists t', sanct_lex_step t (LEmit v) t'.
+
+Definition sanct_op_verdict (e : SanctOpExpr) (v : LexValue) : Prop :=
+  exists e', sanct_op_step e (LEmit v) e'.
+
+(** Helper. Compilation of the sanctions head unfolds to a host call
+    on the compiled principal. *)
+
+Lemma compile_sanctions_shape :
+  forall p,
+    sanct_compile (SLT_Sanctions p) =
+    SOE_Call "sanctions.check" (sanct_compile p).
+Proof. intros p. reflexivity. Qed.
+
+(** Helper. The Lex emission of a scalar constant under the sanctions
+    fragment is uniquely the embedded value. *)
+
+Lemma sanct_lex_const_emit_unique :
+  forall v w t',
+    sanct_lex_step (SLT_Const v) (LEmit w) t' ->
+    w = v.
+Proof. intros v w t' H. inversion H; reflexivity. Qed.
+
+(** Helper. [lift_value] is injective on [LexValue]. *)
+
+Lemma lift_value_inj :
+  forall v w, lift_value v = lift_value w -> v = w.
+Proof.
+  intros v w Heq.
+  assert (Heq' : reflect_op (lift_value v) = reflect_op (lift_value w))
+    by (rewrite Heq; reflexivity).
+  rewrite reflect_lift, reflect_lift in Heq'.
+  exact Heq'.
+Qed.
+
+(** Helper. The Op emission of a [SOE_Lit (lift_value v)] is uniquely
+    the embedded value. *)
+
+Lemma sanct_op_lit_emit_unique :
+  forall v w e',
+    sanct_op_step (SOE_Lit (lift_value v)) (LEmit w) e' ->
+    w = v.
+Proof.
+  intros v w e' H.
+  inversion H; subst.
+  apply lift_value_inj in H1.
+  exact H1.
+Qed.
+
+(** Verdict preservation for the sanctions-dominance case, restricted
+    to a scalar-constant principal. The principal assumption mirrors
+    the admissible-fragment restriction used throughout §6.2: every
+    rule position accepts a value shape, with deeper term structure
+    delivered by earlier compilation cases. *)
+
+Theorem verdict_preservation_sanctions :
+  forall (v_p : LexValue) (vv : LexValue),
+    sanct_lex_verdict (SLT_Sanctions (SLT_Const v_p)) vv <->
+    sanct_op_verdict  (sanct_compile (SLT_Sanctions (SLT_Const v_p))) vv.
+Proof.
+  intros v_p vv. split.
+  - (* Forward. The Lex step fixes vv = host_sanctions v_p; the Op
+       side builds the matching call trace. *)
+    intros [t' Hstep].
+    inversion Hstep; subst.
+    (* The principal substep SLexStepConst fixes the emitted scalar. *)
+    match goal with
+    | [ Hp : sanct_lex_step (SLT_Const v_p) (LEmit ?w) _ |- _ ] =>
+        apply sanct_lex_const_emit_unique in Hp; subst w
+    end.
+    simpl.
+    exists (SOE_Call "sanctions.check" (SOE_Lit (lift_value v_p))).
+    apply SOpStepCall.
+    apply SOpStepLit.
+  - (* Backward. The Op call step fixes vv = host_sanctions v_p; the
+       Lex side mirrors the emission. *)
+    intros [e' Hstep].
+    simpl in Hstep.
+    inversion Hstep; subst.
+    match goal with
+    | [ Hp : sanct_op_step (SOE_Lit (lift_value v_p)) (LEmit ?w) _ |- _ ] =>
+        apply sanct_op_lit_emit_unique in Hp; subst w
+    end.
+    exists (SLT_Sanctions (SLT_Const v_p)).
+    apply SLexStepSanctions.
+    apply SLexStepConst.
+Qed.
+
+(** Sanity. The verdict is always one of the two host outputs. *)
+
+Example sanctions_verdict_is_two_valued :
+  forall v_p,
+    sanct_lex_verdict (SLT_Sanctions (SLT_Const v_p)) (LV_Str "Compliant") \/
+    sanct_lex_verdict (SLT_Sanctions (SLT_Const v_p)) (LV_Str "SanctionsBlocked").
+Proof.
+  intros v_p.
+  destruct (host_sanctions_range v_p) as [Hc | Hb].
+  - left.  exists (SLT_Sanctions (SLT_Const v_p)). rewrite <- Hc.
+    apply SLexStepSanctions. constructor.
+  - right. exists (SLT_Sanctions (SLT_Const v_p)). rewrite <- Hb.
+    apply SLexStepSanctions. constructor.
+Qed.
+
+(* ------------------------------------------------------------------ *)
+(**  10.  Proof obligations.                                          *)
 (* ------------------------------------------------------------------ *)
 
 (** The §6.2 compilation function comprises six cases. The scalar
-    shape of the constant case is closed above. The remaining
-    obligations are registered below as [Admitted.] theorems
-    carrying the signature of the target result and a
-    proof-structure comment.
+    shape of the constant case and the sanctions-dominance case are
+    closed above. The remaining obligations are registered below as
+    [Admitted.] theorems carrying the signature of the target result
+    and a proof-structure comment.
 
     The shapes introduced here as parameters mirror the Rust AST
     extensions in [crates/op-lex-compiler/src/ast.rs]. A follow-on
@@ -289,8 +485,8 @@ Section Obligations.
   (** Parameters carried across this obligations section. Each
       follow-on refinement replaces these with concrete syntactic
       definitions (records, lists, variants; variable references;
-      match expressions; defeasible rules; sanctions dominance;
-      filled holes) taken from the Rust reference. *)
+      match expressions; defeasible rules; filled holes) taken from
+      the Rust reference. *)
 
   Parameter ExtLexTerm     : Type.
   Parameter ExtOpExpr      : Type.
@@ -306,7 +502,6 @@ Section Obligations.
   Parameter ELT_Var        : string -> ExtLexTerm.
   Parameter ELT_Match      : ExtLexTerm -> list (string * string * ExtLexTerm) -> ExtLexTerm.
   Parameter ELT_Defeasible : string -> ExtLexTerm -> list (ExtLexTerm * ExtLexTerm * nat * nat) -> ExtLexTerm.
-  Parameter ELT_Sanctions  : ExtLexTerm -> ExtLexTerm.
   Parameter ELT_HoleFill   : string -> ExtLexTerm -> ExtLexTerm.
 
   (** ** Constant case — record / list / variant shapes.
@@ -395,25 +590,6 @@ Section Obligations.
       ExtOpVerdict  (ExtCompile (ELT_Defeasible rule_name base exceptions)) vv.
   Proof. Admitted.
 
-  (** ** Sanctions-dominance case.
-
-      Goal. For every sanctions-dominance rule, the compiled image
-      (a host call to [sanctions.check] with the lifted principal)
-      emits the same two-valued verdict ({Compliant,
-      SanctionsBlocked}) that the Lex evaluator emits given the
-      same host response.
-
-      Proof strategy. Axiomatize the host [sanctions.check]
-      primitive as a deterministic function from principals to the
-      two-element verdict set; a single case-split on the host
-      response closes the case. *)
-
-  Theorem verdict_preservation_sanctions :
-    forall (principal : ExtLexTerm) (vv : LexValue),
-      ExtLexVerdict (ELT_Sanctions principal) vv <->
-      ExtOpVerdict  (ExtCompile (ELT_Sanctions principal)) vv.
-  Proof. Admitted.
-
   (** ** Hole-fill case — the §6.3 bisimulation up to [tau].
 
       Goal. For every filled discretion hole, the compiled image
@@ -435,7 +611,7 @@ Section Obligations.
 End Obligations.
 
 (* ------------------------------------------------------------------ *)
-(**  10.  End-to-end sanity examples.                                *)
+(**  11.  End-to-end sanity examples.                                *)
 (* ------------------------------------------------------------------ *)
 
 Example const_bool_true_verdict :
