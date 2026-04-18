@@ -27,3 +27,6 @@ tracing = "0.1"
 
 # Testing
 proptest = "1"
+
+# Benchmarking
+criterion = "0.5"
