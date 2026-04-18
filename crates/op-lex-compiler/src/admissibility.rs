@@ -19,6 +19,7 @@
 use crate::ast::{LexBranch, LexTerm, LexValue};
 use crate::context::PreludeBinding;
 use crate::error::{AdmissibilityViolation, CompileError};
+use op_core::OpType;
 
 /// Run the admissibility predicate over a term. Returns `Ok(())` when the
 /// term is admissible, otherwise returns a specific clause violation.
@@ -43,6 +44,26 @@ pub fn check_admissible(term: &LexTerm, prelude: &PreludeBinding) -> Result<(), 
             base, exceptions, ..
         } => {
             check_admissible(base, prelude)?;
+            // §6.2 defeasible rule requires `(priority DESC, source_position ASC)` to
+            // be a total order on the exception set. Two exceptions sharing the same
+            // `(priority, source_position)` leave resolution non-deterministic;
+            // reject at the admissibility gate so the compilation function stays
+            // a function.
+            let mut keys: Vec<(u32, u32)> = exceptions
+                .iter()
+                .map(|e| (e.priority, e.source_position))
+                .collect();
+            keys.sort();
+            for w in keys.windows(2) {
+                if w[0] == w[1] {
+                    return Err(CompileError::NotAdmissible {
+                        reason: AdmissibilityViolation::DefeasibleOrderNotTotal {
+                            priority: w[0].0,
+                            source_position: w[0].1,
+                        },
+                    });
+                }
+            }
             for e in exceptions {
                 check_admissible(&e.guard, prelude)?;
                 check_admissible(&e.body, prelude)?;
@@ -107,6 +128,19 @@ fn check_match_exhaustiveness(
         LexTerm::Const(LexValue::Bool(_)) => Some(vec!["true".to_string(), "false".to_string()]),
         // A sanctions-dominance scrutinee carries the Verdict variant set.
         LexTerm::SanctionsDominance { .. } => prelude.lookup_variant("Verdict").cloned(),
+        // A prelude call whose declared return type has a decidable
+        // constructor set admits match — Bool and Variant returns qualify.
+        // Paper §6.1: exhaustiveness is decided on the scrutinee's TYPE when
+        // that type has a finite registered constructor set.
+        LexTerm::PreludeCall { callee, .. } => {
+            prelude.lookup_callable(callee).and_then(|c| match &c.ty {
+                OpType::Variant(ctors) => {
+                    Some(ctors.iter().map(|(n, _)| n.clone()).collect())
+                }
+                OpType::Bool => Some(vec!["true".to_string(), "false".to_string()]),
+                _ => None,
+            })
+        }
         _ => None,
     };
 

@@ -432,6 +432,17 @@ pub enum OpExpr {
     /// `coalesce(a, b)` — returns `a` if non-null, else `b`.
     Coalesce(Box<OpExpr>, Box<OpExpr>),
 
+    /// Sequential composition `Seq(a, b)` — evaluate `a` for its effect
+    /// (value discarded), then evaluate `b` and return its value.
+    ///
+    /// Type: `type_of(Seq(a, b)) = type_of(b)`. Effect row:
+    /// `effects(Seq(a, b)) = effects(a) ∪ effects(b)`.
+    ///
+    /// The compilation function for Lex filled-hole lowering emits
+    /// `Seq(attestation_append_call, value)` so the attestation effect
+    /// materializes into `mu` while the value preserves its Op-type.
+    Seq(Box<OpExpr>, Box<OpExpr>),
+
     /// `await event within duration` — typed callback suspension.
     Await {
         /// Event identifier.

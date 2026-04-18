@@ -306,6 +306,7 @@ pub(crate) fn expr_effects(expr: &OpExpr) -> EffectRow {
         OpExpr::BinOp(_, a, b) => expr_effects(a).union(&expr_effects(b)),
         OpExpr::UnOp(_, a) => expr_effects(a),
         OpExpr::Coalesce(a, b) => expr_effects(a).union(&expr_effects(b)),
+        OpExpr::Seq(a, b) => expr_effects(a).union(&expr_effects(b)),
         OpExpr::Field(e, _) => expr_effects(e),
         OpExpr::Match { scrutinee, arms, catch_all } => {
             let mut row = expr_effects(scrutinee);

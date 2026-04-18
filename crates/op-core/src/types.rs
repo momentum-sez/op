@@ -319,6 +319,12 @@ fn check_expr(expr: &OpExpr, ctx: &mut TypeContext) -> Result<(), String> {
             check_expr(a, ctx)?;
             check_expr(b, ctx)
         }
+        OpExpr::Seq(a, b) => {
+            // Seq evaluates `a` for its effect, returns `b`'s value.
+            // Type of a Seq expression is the type of its second operand.
+            check_expr(a, ctx)?;
+            check_expr(b, ctx)
+        }
         OpExpr::UnOp(_, a) => check_expr(a, ctx),
         OpExpr::Await { .. } => Ok(()),
         OpExpr::Match {

@@ -258,7 +258,7 @@ fn walk_effects(expr: &OpExpr, acc: &mut std::collections::BTreeSet<Effect>) {
             }
             walk_effects(catch_all, acc);
         }
-        OpExpr::Coalesce(a, b) => {
+        OpExpr::Coalesce(a, b) | OpExpr::Seq(a, b) => {
             walk_effects(a, acc);
             walk_effects(b, acc);
         }
@@ -344,7 +344,11 @@ mod tests {
     }
 
     #[test]
-    fn hole_fill_emits_attestation_record() {
+    fn hole_fill_emits_seq_preserving_value_type() {
+        // §6.2: [[fill(h, v, w)]] = [[v]] with τ-labelled attestation append.
+        // The emitted shape must be OpExpr::Seq(attestation_call, value).
+        // The sequenced value preserves the Op-type of the lifted value so
+        // the §6.3 weak bisimulation holds.
         let ctx = CompileCtx::with_canonical_prelude("demo.fill");
         let term = LexTerm::HoleFill {
             hole_id: "h1".to_string(),
@@ -357,12 +361,28 @@ mod tests {
         };
         let program = compile_lex(&term, &ctx).unwrap();
         match &program.body[0] {
-            Statement::Return(OpExpr::Record(fields)) => {
-                let names: Vec<_> = fields.iter().map(|(k, _)| k.clone()).collect();
-                assert_eq!(names, vec!["attestation", "result"]);
+            Statement::Return(OpExpr::Seq(attestation, value)) => {
+                // The attestation sub-expression is a call into `attestation.append`.
+                match attestation.as_ref() {
+                    OpExpr::Call(name, args) => {
+                        assert_eq!(name, "attestation.append");
+                        let keys: Vec<_> = args.iter().map(|(k, _)| k.as_str()).collect();
+                        assert!(keys.contains(&"hole_id"));
+                        assert!(keys.contains(&"authority"));
+                        assert!(keys.contains(&"digest"));
+                        assert!(keys.contains(&"timestamp"));
+                    }
+                    other => panic!("expected attestation.append call, got {other:?}"),
+                }
+                // The value sub-expression is exactly `[[5]] = OpExpr::Int(5)`.
+                match value.as_ref() {
+                    OpExpr::Int(5) => {}
+                    other => panic!("expected Int(5) as sequenced value, got {other:?}"),
+                }
+                // Effect row carries ProofEmit via the attestation call.
                 assert!(program.effects.contains(&Effect::ProofEmit));
             }
-            other => panic!("expected fill record, got {other:?}"),
+            other => panic!("expected Seq(attestation, value), got {other:?}"),
         }
     }
 
