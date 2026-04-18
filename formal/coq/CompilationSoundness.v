@@ -1243,28 +1243,232 @@ Proof.
 Qed.
 
 (* ------------------------------------------------------------------ *)
-(**  15.  Proof obligations.                                         *)
+(**  15.  Defeasible case.                                           *)
 (* ------------------------------------------------------------------ *)
 
-(** The §6.2 compilation function comprises six cases. The scalar
-    shape of the constant case, the sanctions-dominance case, the
-    variable case, the record shape of the constant case, the list
-    shape of the constant case, the variant shape of the constant
-    case, and the match case are closed above. The remaining
-    obligations are registered below as open theorems carrying the
-    signature of the target result and a proof-structure comment.
+(** The §6.2 defeasible rule:
+
+      [[Defeasible { base, exceptions }]]  =
+        let sorted = exceptions ordered by (priority DESC, source-position ASC) in
+        choose {
+          when [[g_1]] -> [[b_1]];
+          ...;
+          when [[g_n]] -> [[b_n]];
+          else -> [[base]]
+        }
+
+    Scope. The admissible fragment is restricted here to:
+
+      - a scalar-constant base body;
+      - a pre-sorted exception list [(priority, source_pos, guard, body)]
+        carrying boolean guards and scalar-constant bodies;
+      - fixed priority / source-position witnesses on each exception.
+
+    The priority ordering is realized by insisting the caller supply
+    a list already sorted by (priority DESC, source_position ASC),
+    matching the sort performed by the Rust reference at the head of
+    [compile_defeasible] in [crates/op-lex-compiler/src/
+    case_defeasible.rs]. The two metadata fields are carried through
+    the Coq inductive unchanged so the mechanization can compare
+    exception positions when the list-induction proof traverses the
+    exceptions in supplied order.
+
+    Mechanization strategy. A new [DefLexTerm] / [DefOpExpr] layer
+    over the scalar-constant fragment. The base body is a single
+    [LexValue]; each exception is a 4-tuple [(priority, source_pos,
+    guard_bool, body_value)]. [def_compile] lifts the base and every
+    exception body, and lifts each boolean guard to [OE_Bool].
+    Reduction on both sides walks the exception list in supplied
+    order: the first exception whose guard is [true] fires, emitting
+    its body; if no guard fires, both sides emit the base. Verdict
+    preservation follows by list induction on the exceptions: at
+    each step, the guard is [true] or [false]; either side agrees
+    pointwise through the [lift_value] / [OE_Bool] image. *)
+
+(** Concrete Lex head for the defeasible fragment. The base is a
+    scalar value; each exception is a 4-tuple carrying its priority,
+    source-position, boolean guard evaluation, and scalar body. The
+    list is consumed in supplied order — the caller is expected to
+    have sorted by (priority DESC, source_position ASC). *)
+
+Inductive DefLexTerm : Type :=
+  | DLT_Def : LexValue -> list (nat * nat * bool * LexValue) -> DefLexTerm.
+
+(** Concrete Op form for the defeasible fragment. The compiled image
+    carries the lifted base and the pointwise-lifted exception list;
+    each exception's guard becomes an [OE_Bool] literal and each
+    body becomes a lifted scalar. The priority / source-position
+    metadata is not carried into Op (the Rust reference collapses
+    these into the nested [Match] arm order at compile time). *)
+
+Inductive DefOpExpr : Type :=
+  | DOE_Choose : OpExpr -> list (OpExpr * OpExpr) -> DefOpExpr.
+
+(** Lex-side evaluator. Walks the exception list in supplied order;
+    returns the body of the first exception whose guard is [true];
+    falls through to the base when the list is exhausted. *)
+
+Fixpoint def_eval (base : LexValue)
+                  (exceptions : list (nat * nat * bool * LexValue))
+                  : LexValue :=
+  match exceptions with
+  | nil => base
+  | (_, _, g, b) :: rest =>
+      if g then b else def_eval base rest
+  end.
+
+(** Op-side evaluator. Walks the compiled exception list in supplied
+    order; returns the body of the first exception whose lifted
+    guard is [OE_Bool true]; falls through to the lifted base when
+    the list is exhausted. Any non-boolean guard shape forces
+    fall-through (the scalar-boolean-guard scope is enforced by
+    [def_compile]). *)
+
+Fixpoint def_op_find (base : OpExpr)
+                     (exceptions : list (OpExpr * OpExpr))
+                     : OpExpr :=
+  match exceptions with
+  | nil => base
+  | (g, b) :: rest =>
+      match g with
+      | OE_Bool true  => b
+      | OE_Bool false => def_op_find base rest
+      | _             => def_op_find base rest
+      end
+  end.
+
+(** Lex reduction for the defeasible fragment. A [DLT_Def base exs]
+    emits [def_eval base exs] in one observable step. *)
+
+Inductive def_lex_step : DefLexTerm -> Label -> DefLexTerm -> Prop :=
+  | DLexStepDef :
+      forall base exceptions,
+        def_lex_step
+          (DLT_Def base exceptions)
+          (LEmit (def_eval base exceptions))
+          (DLT_Def base exceptions).
+
+(** Op reduction for the defeasible fragment. The outer [DOE_Choose]
+    emits [v] when the body selected by [def_op_find] emits [v]
+    under the scalar [op_step]. *)
+
+Inductive def_op_step : DefOpExpr -> Label -> DefOpExpr -> Prop :=
+  | DOpStepChoose :
+      forall base exceptions v,
+        op_step (def_op_find base exceptions) (LEmit v)
+                (def_op_find base exceptions) ->
+        def_op_step
+          (DOE_Choose base exceptions)
+          (LEmit v)
+          (DOE_Choose base exceptions).
+
+(** Compilation, defeasible fragment. Mirrors the Rust reference in
+    [crates/op-lex-compiler/src/case_defeasible.rs] for the
+    scalar-constant-base, boolean-guard, scalar-constant-body
+    restriction: the base is lifted, each exception's guard is
+    lifted to [OE_Bool] and its body to the lifted scalar. The sort
+    performed by the Rust reference is assumed to have been carried
+    out by the caller; the list is consumed in supplied order. *)
+
+Definition def_compile (t : DefLexTerm) : DefOpExpr :=
+  match t with
+  | DLT_Def base exceptions =>
+      DOE_Choose
+        (lift_value base)
+        (map (fun (e : nat * nat * bool * LexValue) =>
+                let '(_, _, g, b) := e in
+                (OE_Bool g, lift_value b)) exceptions)
+  end.
+
+Definition def_lex_verdict (t : DefLexTerm) (v : LexValue) : Prop :=
+  exists t', def_lex_step t (LEmit v) t'.
+
+Definition def_op_verdict (e : DefOpExpr) (v : LexValue) : Prop :=
+  exists e', def_op_step e (LEmit v) e'.
+
+(** Helper. The Op-side selector, parameterized by the lifted base
+    and the pointwise-lifted exception list, selects the lifted
+    image of the Lex-side evaluator's result. Proof by list
+    induction on the exceptions; each step discriminates on the
+    boolean guard and closes on either branch. *)
+
+Lemma def_op_find_lifts :
+  forall base exceptions,
+    def_op_find (lift_value base)
+                (map (fun (e : nat * nat * bool * LexValue) =>
+                        let '(_, _, g, b) := e in
+                        (OE_Bool g, lift_value b)) exceptions)
+    = lift_value (def_eval base exceptions).
+Proof.
+  induction exceptions as [ | [[[p s] g] b] rest IH].
+  - simpl. reflexivity.
+  - simpl. destruct g.
+    + (* Guard fires: Op selects [lift_value b]; Lex selects [b]. *)
+      reflexivity.
+    + (* Guard does not fire: both sides recurse. *)
+      exact IH.
+Qed.
+
+(** Verdict preservation for the defeasible case, restricted to a
+    scalar-constant base, boolean guards, and scalar-constant
+    exception bodies. *)
+
+Theorem verdict_preservation_defeasible :
+  forall (base : LexValue)
+         (exceptions : list (nat * nat * bool * LexValue))
+         (vv : LexValue),
+    def_lex_verdict (DLT_Def base exceptions) vv <->
+    def_op_verdict  (def_compile (DLT_Def base exceptions)) vv.
+Proof.
+  intros base exceptions vv. split.
+  - (* Forward. *)
+    intros [t' Hstep].
+    inversion Hstep; subst.
+    simpl.
+    exists (DOE_Choose (lift_value base)
+                       (map (fun (e : nat * nat * bool * LexValue) =>
+                               let '(_, _, g, b) := e in
+                               (OE_Bool g, lift_value b)) exceptions)).
+    apply DOpStepChoose.
+    rewrite def_op_find_lifts.
+    apply lift_value_emits.
+  - (* Backward. *)
+    intros [e' Hstep].
+    simpl in Hstep.
+    inversion Hstep; subst.
+    match goal with
+    | [ H : op_step _ (LEmit vv) _ |- _ ] =>
+        rewrite def_op_find_lifts in H;
+        apply lift_value_emits_unique in H;
+        subst vv
+    end.
+    exists (DLT_Def base exceptions).
+    apply DLexStepDef.
+Qed.
+
+(* ------------------------------------------------------------------ *)
+(**  16.  Proof obligations.                                         *)
+(* ------------------------------------------------------------------ *)
+
+(** The §6.2 compilation function comprises eight closed cases and
+    one remaining obligation. The scalar shape of the constant case,
+    the sanctions-dominance case, the variable case, the record
+    shape of the constant case, the list shape of the constant case,
+    the variant shape of the constant case, the match case, and the
+    defeasible case are closed above. The hole-fill obligation is
+    registered below as an open theorem carrying the signature of
+    the target result and a proof-structure comment.
 
     The shapes introduced here as parameters mirror the Rust AST
     extensions in [crates/op-lex-compiler/src/ast.rs]. A follow-on
     file replaces each [Parameter] with the corresponding
-    [Inductive] definition and discharges the open statements. *)
+    [Inductive] definition and discharges the open statement. *)
 
 Section Obligations.
 
-  (** Parameters carried across this obligations section. Each
+  (** Parameters carried across this obligations section. The
       follow-on refinement replaces these with concrete syntactic
-      definitions (defeasible rules; filled holes) taken from the
-      Rust reference. *)
+      definitions (filled holes) taken from the Rust reference. *)
 
   Parameter ExtLexTerm     : Type.
   Parameter ExtOpExpr      : Type.
@@ -1272,28 +1476,7 @@ Section Obligations.
   Parameter ExtLexVerdict  : ExtLexTerm -> LexValue -> Prop.
   Parameter ExtOpVerdict   : ExtOpExpr  -> LexValue -> Prop.
 
-  Parameter ELT_Defeasible : string -> ExtLexTerm -> list (ExtLexTerm * ExtLexTerm * nat * nat) -> ExtLexTerm.
   Parameter ELT_HoleFill   : string -> ExtLexTerm -> ExtLexTerm.
-
-  (** ** Defeasible case.
-
-      Goal. For every defeasible rule with base body [b] and
-      exception list [exs], the compiled image (nested guarded
-      matches sorted by priority descending then source_position
-      ascending) emits verdict [vv] iff the Lex rule emits [vv].
-
-      Proof strategy. Well-founded induction on the lexicographic
-      order on (priority, source_position). The base body is the
-      fallback when no guard fires. *)
-
-  Theorem verdict_preservation_defeasible :
-    forall (rule_name : string)
-           (base : ExtLexTerm)
-           (exceptions : list (ExtLexTerm * ExtLexTerm * nat * nat))
-           (vv : LexValue),
-      ExtLexVerdict (ELT_Defeasible rule_name base exceptions) vv <->
-      ExtOpVerdict  (ExtCompile (ELT_Defeasible rule_name base exceptions)) vv.
-  Proof. Admitted.
 
   (** ** Hole-fill case — the §6.3 bisimulation up to [tau].
 

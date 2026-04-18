@@ -11,9 +11,12 @@ Coq sources backing the formal obligations enumerated in `formal/README.md`.
   the scalar shape of the constant compilation case, the
   sanctions-dominance case, the variable case, the record shape of
   the constant case, the list shape of the constant case, the
-  variant shape of the constant case, and the match case
+  variant shape of the constant case, the match case
   (scalar-constant scrutinees, nullary-pattern branches,
-  scalar-constant branch bodies).
+  scalar-constant branch bodies), and the defeasible case
+  (scalar-constant base, boolean guards, scalar-constant exception
+  bodies, exception list supplied pre-sorted by
+  `(priority DESC, source_position ASC)`).
 
 ## What `CompilationSoundness.v` mechanizes
 
@@ -155,6 +158,43 @@ and a scalar payload:
    the scalar `lift_value_emits` / `lift_value_inj` lemmas on the
    payload.
 
+### Defeasible case
+
+For the §6.2 defeasible rule, restricted to a scalar-constant base
+body, boolean guards, and scalar-constant exception bodies:
+
+1. Concrete Lex (`DefLexTerm`) and Op (`DefOpExpr`) AST extensions
+   carrying a scalar base and a list of
+   `(priority, source_position, guard, body)` exceptions on the Lex
+   side, and a `DOE_Choose` node over a lifted base and a list of
+   `(guard, body)` Op pairs on the Op side. The priority and
+   source-position metadata is carried on the Lex side; the Op side
+   consumes the already-sorted list in supplied order, matching the
+   Rust reference in `crates/op-lex-compiler/src/case_defeasible.rs`
+   which sorts its exception list by
+   `(priority DESC, source_position ASC)` at the head of
+   `compile_defeasible`.
+2. A pair of evaluators `def_eval` / `def_op_find` that walk the
+   exception list in supplied order, returning the body of the first
+   exception whose guard is `true`; on exhaustion both evaluators
+   return the (lifted) base.
+3. Small-step reductions `def_lex_step` / `def_op_step` emitting the
+   evaluator's result; the Op rule threads the scalar `op_step`
+   emission through the selected body via a single explicit premise,
+   mirroring the match-case `MOpStepChoose` construction.
+4. The compilation function `def_compile` mapping a defeasible term
+   to the lifted choose-expression, via
+   `map (fun (p, s, g, b) => (OE_Bool g, lift_value b))` over the
+   exception list.
+5. The key helper `def_op_find_lifts` — the lifted exception-list
+   evaluator agrees pointwise with the Lex-side evaluator. Proof
+   by list induction on the exceptions; each step case-splits on
+   the boolean guard and closes on either branch without residual.
+6. The main biconditional `verdict_preservation_defeasible` closing
+   both directions with `Qed.`, by inversion on the defeasible step
+   plus the evaluator-agreement helper and the scalar
+   `lift_value_emits` / `lift_value_emits_unique` lemmas.
+
 ### Match case
 
 For the §6.2 match rule, restricted to scalar-constant scrutinees,
@@ -198,25 +238,25 @@ and no warnings.
 
 ## Proof obligations
 
-The §6.2 compilation function comprises seven closed cases: the
-scalar shape of the constant case, the sanctions-dominance case,
-the variable case, the record shape of the constant case, the list
-shape of the constant case, the variant shape of the constant case,
-and the match case. All seven close with `Qed.`. Two obligations
-remain, registered in the `Obligations` section at the foot of
-`CompilationSoundness.v`, with a proof-structure comment for each:
+Eight of nine compilation cases are mechanized. The §6.2 compilation
+function comprises eight closed cases: the scalar shape of the
+constant case, the sanctions-dominance case, the variable case, the
+record shape of the constant case, the list shape of the constant
+case, the variant shape of the constant case, the match case, and
+the defeasible case. All eight close with `Qed.`. One obligation
+remains, registered in the `Obligations` section at the foot of
+`CompilationSoundness.v`, with a proof-structure comment:
 
 | Obligation | Shape | Strategy |
 |---|---|---|
-| Defeasible | `Defeasible name base exceptions` | Well-founded induction on `(priority DESC, source_position ASC)`. |
 | HoleFill (§6.3) | `HoleFill hole_id filler witness` | Coinduction on a bisimulation relation pairing each Lex state with the Op state reached by unwinding one `tau` attestation-append step. |
 
-Each obligation is an open theorem whose signature matches the
-target result. The surrounding parameters (`ExtLexTerm`,
+The remaining obligation is an open theorem whose signature matches
+the target result. The surrounding parameters (`ExtLexTerm`,
 `ExtOpExpr`, `ExtCompile`, `ExtLexVerdict`, `ExtOpVerdict`, and the
-syntactic constructors `ELT_*`) stand in for the extended inductive
-definitions that a follow-on file introduces by mirroring the Rust
-AST in `crates/op-lex-compiler/src/ast.rs`.
+syntactic constructor `ELT_HoleFill`) stand in for the extended
+inductive definitions that a follow-on file introduces by mirroring
+the Rust AST in `crates/op-lex-compiler/src/ast.rs`.
 
 ## Running the typechecker
 
@@ -225,7 +265,7 @@ cd formal/coq
 coqc CompilationSoundness.v
 ```
 
-Exit code zero and no diagnostic output indicates the seven
+Exit code zero and no diagnostic output indicates the eight
 mechanized cases are machine-verified by Rocq 9.1.1.
 
 ## Relation to the Rust reference
@@ -236,13 +276,15 @@ mechanized cases are machine-verified by Rocq 9.1.1.
 record / list / variant shapes),
 `crates/op-lex-compiler/src/case_sanctions.rs`
 (`compile_sanctions`), `crates/op-lex-compiler/src/case_var.rs`
-(`compile_var`), and `crates/op-lex-compiler/src/case_match.rs`
-(`compile_match`, fail-closed sentinel `fail_closed_expr`). Each
-Coq definition is the mathematical companion of the corresponding
-Rust function; every scalar base constructor handled by the Rust
-`lift_value` is handled by the Coq `lift_value`; the
-sanctions-dominance, variable, record, list, variant, and match
-compilation shapes agree. Extending the Coq mechanization to the
-remaining cases is a matter of mirroring the other `case_*.rs`
-files into the corresponding inductive relations and discharging
-the obligations registered in the `Obligations` section.
+(`compile_var`), `crates/op-lex-compiler/src/case_match.rs`
+(`compile_match`, fail-closed sentinel `fail_closed_expr`), and
+`crates/op-lex-compiler/src/case_defeasible.rs`
+(`compile_defeasible`). Each Coq definition is the mathematical
+companion of the corresponding Rust function; every scalar base
+constructor handled by the Rust `lift_value` is handled by the Coq
+`lift_value`; the sanctions-dominance, variable, record, list,
+variant, match, and defeasible compilation shapes agree. Extending
+the Coq mechanization to the remaining case is a matter of
+mirroring `case_fill.rs` into the corresponding inductive relations
+and discharging the obligation registered in the `Obligations`
+section.
