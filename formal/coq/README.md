@@ -8,8 +8,9 @@ Coq sources backing the formal obligations enumerated in `formal/README.md`.
   lemma as a typecheck smoke test.
 - `CompilationSoundness.v` — verdict preservation for the compilation
   function `[[.]] : Lex -> Op` from the Op paper §6.2, mechanized for
-  the scalar shape of the constant compilation case and for the
-  sanctions-dominance case.
+  the scalar shape of the constant compilation case, the
+  sanctions-dominance case, the variable case, and the record shape
+  of the constant case.
 
 ## What `CompilationSoundness.v` mechanizes
 
@@ -66,23 +67,66 @@ scalar-constant principal:
    both directions with `Qed.`.
 7. A two-valued sanity example `sanctions_verdict_is_two_valued`.
 
+### Variable case
+
+For the §6.2 variable rule against a shared prelude:
+
+1. Concrete Lex (`VarLexTerm`) and Op (`VarOpExpr`) AST extensions
+   with constant and variable heads.
+2. A shared deterministic prelude `prelude : string -> option
+   LexValue` read from by both languages, enforcing identical
+   lookup on each side.
+3. Small-step reductions `var_lex_step` / `var_op_step` emitting
+   the looked-up value when `prelude n = Some v`, with no emission
+   rule for unbound names.
+4. The compilation function `var_compile` mapping `VLT_Var n` to
+   `VOE_Var n` and lifting constants.
+5. The helper lemma `var_compile_shape_var` unfolding the compiled
+   shape of a variable.
+6. The main biconditional `verdict_preservation_var` closing both
+   directions with `Qed.`.
+7. The companion theorem `verdict_preservation_var_const`
+   recovering the scalar-constant result inside the variable
+   fragment, via the helper `var_op_lit_emit_unique`.
+
+### Constant case — record shape
+
+For the §6.2 constant case extended to records with scalar fields:
+
+1. Concrete Lex (`RecLexTerm`) and Op (`RecOpExpr`) AST extensions
+   carrying record-valued constants.
+2. A pointwise field-emission relation `op_fields_emit` pairing the
+   compiled Op field list with the source Lex field list.
+3. Small-step reductions `rec_lex_step` / `rec_op_step` emitting
+   the field list in one step; the emission payload is the field
+   list itself, taking the bespoke `list (string * LexValue)` in
+   place of the surrounding framework's scalar `LexValue` alphabet.
+4. The compilation function `rec_compile` mapping a record-valued
+   constant to the pointwise lifted Op record.
+5. Two helper lemmas — `map_lift_value_emits` (the pointwise lifted
+   field list emits the source list) and
+   `map_lift_value_emits_unique` (the emitted list is uniquely
+   determined by the source list), each proved by induction on the
+   field list.
+6. The main biconditional `verdict_preservation_const_record`
+   closing both directions with `Qed.`.
+
 The file type-checks under `coqc` (Rocq Prover 9.1.1) with no errors
 and no warnings.
 
 ## Proof obligations
 
 The §6.2 compilation function comprises six cases. The scalar shape
-of the constant case and the sanctions-dominance case are closed
-(`Qed.`). Seven obligations remain, registered in the `Obligations`
-section at the foot of `CompilationSoundness.v`, with a
-proof-structure comment for each:
+of the constant case, the sanctions-dominance case, the variable
+case, and the record shape of the constant case are closed (`Qed.`).
+Five obligations remain, registered in the `Obligations` section at
+the foot of `CompilationSoundness.v`, with a proof-structure comment
+for each:
 
 | Obligation | Shape | Strategy |
 |---|---|---|
-| Constant — record | `LV_Record fields` | Structural induction with nested induction on the field list. |
 | Constant — list | `LV_List elems` | Structural induction with nested induction on the element list. |
-| Constant — variant | `LV_Variant tag payload` | Structural induction, reducing to the record-shape obligation via the two-field record encoding. |
-| Variable | `Var name` | Direct rewrite through the prelude-lookup equation. |
+| Constant — variant | `LV_Variant tag payload` | Structural induction, reducing to the record-shape result via the two-field record encoding. |
 | Match | `Match scrutinee branches` | Induction on the branch list; base via the constant lemma. |
 | Defeasible | `Defeasible name base exceptions` | Well-founded induction on `(priority DESC, source_position ASC)`. |
 | HoleFill (§6.3) | `HoleFill hole_id filler witness` | Coinduction on a bisimulation relation pairing each Lex state with the Op state reached by unwinding one `tau` attestation-append step. |
@@ -102,20 +146,22 @@ cd formal/coq
 coqc CompilationSoundness.v
 ```
 
-Exit code zero and no diagnostic output indicates the scalar case
-is machine-verified by Rocq 9.1.1.
+Exit code zero and no diagnostic output indicates the four
+mechanized cases are machine-verified by Rocq 9.1.1.
 
 ## Relation to the Rust reference
 
 `CompilationSoundness.v` mirrors the Rust definitions in
 `crates/op-lex-compiler/src/lift.rs` (`lift_value`),
-`crates/op-lex-compiler/src/case_const.rs` (`compile_const`), and
-`crates/op-lex-compiler/src/case_sanctions.rs` (`compile_sanctions`).
-Each Coq definition is the mathematical companion of the
-corresponding Rust function; every scalar base constructor handled
-by the Rust `lift_value` is handled by the Coq `lift_value`, and
-the sanctions-dominance compilation shape agrees. Extending the
-Coq mechanization to the remaining shapes and cases is a matter of
-mirroring the other `case_*.rs` files into the corresponding
-inductive relations and discharging the obligations registered in
-the `Obligations` section.
+`crates/op-lex-compiler/src/case_const.rs` (`compile_const`,
+record shape), `crates/op-lex-compiler/src/case_sanctions.rs`
+(`compile_sanctions`), and `crates/op-lex-compiler/src/case_var.rs`
+(`compile_var`). Each Coq definition is the mathematical companion
+of the corresponding Rust function; every scalar base constructor
+handled by the Rust `lift_value` is handled by the Coq
+`lift_value`; the sanctions-dominance, variable, and record
+compilation shapes agree. Extending the Coq mechanization to the
+remaining shapes and cases is a matter of mirroring the other
+`case_*.rs` files into the corresponding inductive relations and
+discharging the obligations registered in the `Obligations`
+section.
