@@ -4,6 +4,7 @@ members = [
     "crates/op-core",
     "crates/op-compiler",
     "crates/op-stdlib",
+    "crates/op-lex-compiler",
 ]
 
 [workspace.package]
