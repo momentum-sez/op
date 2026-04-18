@@ -71,5 +71,6 @@ pub use gas::{GasConfig, GasEstimate, GasMeter};
 pub use host::{HostError, HostOutcome, OpHost, PrimitiveCall};
 pub use parser::{parse_program, parse_step};
 pub use types::{
-    typecheck_program, GasAnalysis, SafetyPredicateFailure, TypeCheckResult, TypeContext,
+    program_effect_row, typecheck_program, GasAnalysis, SafetyPredicateFailure, TypeCheckResult,
+    TypeContext,
 };
