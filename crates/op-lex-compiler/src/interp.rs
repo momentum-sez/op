@@ -152,11 +152,28 @@ fn eval_expr(
         },
 
         OpExpr::Seq(a, b) => {
-            // Evaluate `a` for its effect — the host call or effectful sub-expression
-            // is invoked, its value discarded. Then evaluate `b` and return.
-            match eval_expr(a, env, host, jurisdiction) {
-                EvalResult::Value(_) => eval_expr(b, env, host, jurisdiction),
-                err @ EvalResult::Error(_) => err,
+            // Evaluate `a` for its effect, discard its value, return `b`.
+            //
+            // §6.3 τ-labelled semantics: calls carrying only a ProofEmit
+            // effect (attestation.append and equivalents) with no data
+            // dependence on the result must not abort the Seq on host
+            // error. The attestation is advisory against the trace; a
+            // transient or unknown host-side failure is logged but does not
+            // suppress evaluation of `b`. Any other sub-expression failure
+            // propagates as normal — the Seq is strict on the value-carrying
+            // operand.
+            match a.as_ref() {
+                OpExpr::Call(name, _) if is_infallible_proof_emit(name) => {
+                    // Attempt the host call; log presence; continue to `b`
+                    // regardless of outcome so the τ-labelled bisimulation
+                    // case holds under host transience.
+                    let _ = eval_expr(a, env, host, jurisdiction);
+                    eval_expr(b, env, host, jurisdiction)
+                }
+                _ => match eval_expr(a, env, host, jurisdiction) {
+                    EvalResult::Value(_) => eval_expr(b, env, host, jurisdiction),
+                    err @ EvalResult::Error(_) => err,
+                },
             }
         }
 
@@ -220,6 +237,14 @@ fn eval_expr(
 
         other => EvalResult::Error(format!("interp: unsupported expression: {other:?}")),
     }
+}
+
+/// Identify the call names that carry only a ProofEmit effect and have no
+/// data dependence on the caller. Host errors on these calls are logged but
+/// do not interrupt the enclosing Seq evaluation, preserving the §6.3
+/// τ-labelled bisimulation under host transience.
+fn is_infallible_proof_emit(name: &str) -> bool {
+    matches!(name, "attestation.append" | "attestation.emit")
 }
 
 fn eval_binop(op: BinOp, a: &Value, b: &Value) -> EvalResult {

@@ -14,11 +14,17 @@
 //! tagged with the reason `"pattern_unmatched"`. Admissibility has already
 //! decided the match is exhaustive — the catch-all is purely defence-in-depth
 //! against runtime-observed constructors not present in the compile-time type.
+//!
+//! Each branch is compiled under a context extended with the branch's
+//! constructor-payload binders. The admissible fragment's nullary
+//! constructors carry a vacuous binder set, but the compiler still threads
+//! the extension through so a later relaxation of admissibility (dependent
+//! match) lands on a code path that already scopes binders correctly.
 
 use crate::ast::LexBranch;
 use crate::context::CompileCtx;
 use crate::error::CompileError;
-use op_core::{MatchArm, OpExpr};
+use op_core::{MatchArm, OpExpr, OpType};
 
 /// Compile a match expression.
 pub fn compile_match(
@@ -29,7 +35,13 @@ pub fn compile_match(
 ) -> Result<OpExpr, CompileError> {
     let mut arms = Vec::with_capacity(branches.len());
     for b in branches {
-        let body = compile_one(&b.body, ctx)?;
+        // Extend the context with this branch's binder bound to the payload
+        // type. The admissible fragment restricts payloads to first-order
+        // data, so `OpType::Record(vec![])` is a sound conservative choice
+        // until the admissible fragment opens up dependent match.
+        let branch_binders = binders_for_branch(b);
+        let branch_ctx = ctx.with_binders(branch_binders);
+        let body = compile_one(&b.body, &branch_ctx)?;
         arms.push(MatchArm {
             pattern: b.tag.clone(),
             binding: b.binder.clone(),
@@ -42,6 +54,20 @@ pub fn compile_match(
         arms,
         catch_all: Box::new(catch_all),
     })
+}
+
+/// Produce the binder list introduced by a single match branch.
+///
+/// The binder is the constructor's payload name; its type is the payload
+/// type carried by the scrutinee's variant. Nullary constructors (the
+/// admissible fragment today) use the bookkeeping binder `"_"` bound to
+/// the unit type; non-trivial binders use `Record(vec![])` as a
+/// conservative first-order placeholder.
+fn binders_for_branch(b: &LexBranch) -> Vec<(String, OpType)> {
+    if b.binder.is_empty() || b.binder == "_" {
+        return Vec::new();
+    }
+    vec![(b.binder.clone(), OpType::Record(vec![]))]
 }
 
 /// The fail-closed verdict — a `Verdict::NonCompliant { reason }` record

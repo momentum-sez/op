@@ -5,8 +5,15 @@
 //! `identity_mutation`, or `fiscal_transfer` must be dominated by a
 //! `sanctions_check`, with a single deferred-subject exception: entity
 //! creation where the subject does not yet exist.
+//!
+//! The analysis walks every reachable position — statement-level step
+//! signatures AND expression-level host calls surfaced inside `Return`,
+//! `Expr`, `Run`, `Let` bodies. The expression walker consults a built-in
+//! primitive-effects table mirroring the canonical corpus, so that a bare
+//! `OpExpr::Call("ownership.transfer", ...)` is rejected at the same
+//! precedence as a `Statement::Step` declaring `SovereignWrite`.
 
-use crate::ast::{Effect, OpExpr, OpProgram, Statement, StepBody};
+use crate::ast::{Effect, MatchArm, OpExpr, OpProgram, Statement, StepBody};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use thiserror::Error;
@@ -124,6 +131,12 @@ pub fn write_class_effects() -> BTreeSet<Effect> {
 /// prefix carries `Effect::SanctionsCheck`. Because real programs may use
 /// `par` and `choose`, each branch is analyzed independently and the check
 /// is satisfied if the dominator appears on every path.
+///
+/// Expression-level host calls surfaced inside `Return`, `Expr`, `Run`,
+/// and `Let` bodies are walked by [`walk_expr_effects`], which consults the
+/// canonical primitive-effects table and rejects any write-class effect
+/// without a dominating sanctions check under the same precedence as
+/// statement-level step signatures.
 pub fn check_effect_safety(program: &OpProgram) -> Result<(), Vec<EffectSafetyError>> {
     let mut ctx = SafetyCtx::default();
     ctx.walk_block(&program.body);
@@ -156,18 +169,25 @@ impl SafetyCtx {
                     self.sanctions_seen = true;
                 }
             }
-            Statement::Let { .. } | Statement::Return(_) | Statement::Expr(_) | Statement::Run { .. } => {}
+            Statement::Let { name, value, .. } => {
+                self.check_expr_in_stmt(value, name);
+            }
+            Statement::Return(expr) | Statement::Expr(expr) => {
+                self.check_expr_in_stmt(expr, "<expr>");
+            }
+            Statement::Run { name, call } => {
+                self.check_expr_in_stmt(call, name);
+            }
             Statement::Par { branches } => {
                 // Each branch observes the current environment but cannot see siblings.
                 let parent_sanctions = self.sanctions_seen;
                 let mut all_sanctions_after = true;
-                for (_name, _expr) in branches {
-                    let sub = SafetyCtx {
+                for (name, expr) in branches {
+                    let mut sub = SafetyCtx {
                         sanctions_seen: parent_sanctions,
                         errors: Vec::new(),
                     };
-                    // Flat expression branches do not introduce steps today.
-                    // A future extension could walk nested step bodies here.
+                    sub.check_expr_in_stmt(expr, name);
                     if !sub.sanctions_seen {
                         all_sanctions_after = false;
                     }
@@ -178,7 +198,10 @@ impl SafetyCtx {
             Statement::Choose { arms, else_block } => {
                 let parent = self.sanctions_seen;
                 let mut every_branch_gates = true;
-                for (_guard, branch) in arms {
+                for (guard, branch) in arms {
+                    // The guard is evaluated in the pre-branch environment;
+                    // writes inside it are bound by the outer dominator state.
+                    self.check_expr_in_stmt(guard, "<guard>");
                     let mut sub = SafetyCtx {
                         sanctions_seen: parent,
                         errors: Vec::new(),
@@ -211,6 +234,31 @@ impl SafetyCtx {
                 self.walk_block(body);
             }
             Statement::Policy { .. } => {}
+        }
+    }
+
+    /// Walk an expression inside a statement context, checking every call's
+    /// inferred effect row against the sanctions dominator. Updates
+    /// `sanctions_seen` if the expression carries a `SanctionsCheck` effect
+    /// (e.g. a `sanctions.check` call).
+    fn check_expr_in_stmt(&mut self, expr: &OpExpr, site: &str) {
+        let walked = walk_expr_effects(expr);
+        let write_class = write_class_effects();
+        for entry in &walked {
+            if write_class.contains(&entry.effect) && !self.sanctions_seen {
+                // Deferred-subject exception: if the primitive being called
+                // is entity-creation class, a post-flight sanctions check
+                // is permitted.
+                if !entry.deferred_subject {
+                    self.errors.push(EffectSafetyError::UndominatedWrite {
+                        effect: entry.effect.clone(),
+                        step: format!("{site}:{}", entry.call_name),
+                    });
+                }
+            }
+        }
+        if walked.iter().any(|e| e.effect == Effect::SanctionsCheck) {
+            self.sanctions_seen = true;
         }
     }
 
@@ -266,7 +314,205 @@ impl SafetyCtx {
                 step: step.id.clone(),
             });
         }
+
+        // Arguments to a step's primitive body, and any inline block body,
+        // carry their own expression-level effects that must equally respect
+        // the dominator state. We track sanctions visibility updates within
+        // the step's own expression positions because a well-formed step may
+        // chain a sanctions sub-call before a subsequent write.
+        match &step.body {
+            StepBody::Primitive(prim, args) => {
+                // Treat the call as a synthetic expression: primitive's
+                // canonical effects + every argument's effects.
+                let mut synthesized = Vec::new();
+                for eff in canonical_effects_for(&prim.0) {
+                    synthesized.push(WalkedCall {
+                        call_name: prim.0.clone(),
+                        effect: eff,
+                        deferred_subject: canonical_is_deferred_subject(&prim.0),
+                    });
+                }
+                for (_, arg) in args {
+                    synthesized.extend(walk_expr_effects(arg));
+                }
+                for entry in &synthesized {
+                    if write_class.contains(&entry.effect) && !self.sanctions_seen {
+                        if !entry.deferred_subject {
+                            // Step already reports this via the
+                            // signature-level path; skip duplicates when the
+                            // step declared the same effect on its signature.
+                            if !step.signature.effects.contains(&entry.effect) {
+                                self.errors.push(EffectSafetyError::UndominatedWrite {
+                                    effect: entry.effect.clone(),
+                                    step: format!("{}:{}", step.id, entry.call_name),
+                                });
+                            }
+                        }
+                    }
+                }
+                if synthesized
+                    .iter()
+                    .any(|e| e.effect == Effect::SanctionsCheck)
+                {
+                    self.sanctions_seen = true;
+                }
+            }
+            StepBody::Block(inner) => {
+                let parent = self.sanctions_seen;
+                let mut sub = SafetyCtx {
+                    sanctions_seen: parent,
+                    errors: Vec::new(),
+                };
+                sub.walk_block(inner);
+                self.errors.extend(sub.errors);
+                self.sanctions_seen = self.sanctions_seen || sub.sanctions_seen;
+            }
+        }
     }
+}
+
+/// One reachable call surfaced by the expression walker, with its inferred
+/// effect and whether the callee is in the deferred-subject class.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct WalkedCall {
+    /// Dotted call name (e.g. `ownership.transfer`).
+    pub(crate) call_name: String,
+    /// One of the effects the callee carries.
+    pub(crate) effect: Effect,
+    /// Whether the callee qualifies for the deferred-subject exception.
+    pub(crate) deferred_subject: bool,
+}
+
+/// Recursively infer the reachable call effects of an expression.
+///
+/// Every `OpExpr::Call(name, args)` contributes the canonical effect row of
+/// `name` (looked up in the canonical primitive table) plus the effects of
+/// its arguments. `Match`, `Seq`, `Record`, `BinOp`, and the linear / lock
+/// eliminators recurse into their sub-expressions. Literals contribute
+/// nothing.
+pub(crate) fn walk_expr_effects(expr: &OpExpr) -> Vec<WalkedCall> {
+    let mut out: Vec<WalkedCall> = Vec::new();
+    walk_expr_effects_into(expr, &mut out);
+    out
+}
+
+fn walk_expr_effects_into(expr: &OpExpr, out: &mut Vec<WalkedCall>) {
+    match expr {
+        OpExpr::Unit
+        | OpExpr::Bool(_)
+        | OpExpr::Int(_)
+        | OpExpr::String(_)
+        | OpExpr::Null
+        | OpExpr::Var(_)
+        | OpExpr::Await { .. }
+        | OpExpr::AssertSafety(_) => {}
+        OpExpr::Field(e, _) => walk_expr_effects_into(e, out),
+        OpExpr::Record(fields) => {
+            for (_, e) in fields {
+                walk_expr_effects_into(e, out);
+            }
+        }
+        OpExpr::List(es) | OpExpr::Tuple(es) => {
+            for e in es {
+                walk_expr_effects_into(e, out);
+            }
+        }
+        OpExpr::Call(name, args) => {
+            for eff in canonical_effects_for(name) {
+                out.push(WalkedCall {
+                    call_name: name.clone(),
+                    effect: eff,
+                    deferred_subject: canonical_is_deferred_subject(name),
+                });
+            }
+            for (_, a) in args {
+                walk_expr_effects_into(a, out);
+            }
+        }
+        OpExpr::BinOp(_, a, b) | OpExpr::Coalesce(a, b) | OpExpr::Seq(a, b) => {
+            walk_expr_effects_into(a, out);
+            walk_expr_effects_into(b, out);
+        }
+        OpExpr::UnOp(_, a) => walk_expr_effects_into(a, out),
+        OpExpr::Match {
+            scrutinee,
+            arms,
+            catch_all,
+        } => {
+            walk_expr_effects_into(scrutinee, out);
+            for MatchArm { body, .. } in arms {
+                walk_expr_effects_into(body, out);
+            }
+            walk_expr_effects_into(catch_all, out);
+        }
+        OpExpr::ConsumeLinear(inner) => walk_expr_effects_into(inner, out),
+        OpExpr::Lock { resource, .. } => walk_expr_effects_into(resource, out),
+        OpExpr::CommitTransfer { locked, witness }
+        | OpExpr::ReleaseLock { locked, witness } => {
+            walk_expr_effects_into(locked, out);
+            walk_expr_effects_into(witness, out);
+        }
+    }
+}
+
+/// Canonical primitive effect table.
+///
+/// Mirrors the shapes op-stdlib carries in `CANONICAL_PRIMITIVES`. op-core
+/// cannot depend on op-stdlib (stdlib depends on core), so the shape table
+/// is inlined here. A primitive name not present returns an empty effect
+/// row — conservative: the analyzer treats the call as pure and defers to
+/// the host to reject an unknown name at run time.
+pub(crate) fn canonical_effects_for(name: &str) -> Vec<Effect> {
+    match name {
+        // Entity
+        "create.entity" => vec![Effect::SovereignWrite],
+        "update.entity_status" => vec![Effect::SovereignWrite],
+        // Ownership
+        "ownership.issue_shares" => vec![Effect::SovereignWrite],
+        "ownership.transfer" => vec![Effect::SovereignWrite],
+        "update.cap_table" => vec![Effect::SovereignWrite],
+        "membership.admit" => vec![Effect::SovereignWrite],
+        // Fiscal
+        "create.treasury" => vec![Effect::SovereignWrite],
+        "create.bank_account" => vec![Effect::SovereignWrite],
+        "fiscal.open_account" => vec![Effect::SovereignWrite],
+        "fiscal.transfer" => vec![Effect::FiscalTransfer, Effect::SovereignWrite],
+        // Identity
+        "identity.verify" => vec![Effect::ExternalRead, Effect::IdentityMutation],
+        // Consent
+        "consent.board_resolution"
+        | "consent.member_resolution"
+        | "consent.shareholder_vote" => {
+            vec![Effect::GovernanceRequest, Effect::SovereignWrite]
+        }
+        // Screening
+        "screening.sanctions" | "sanctions.check" => {
+            vec![Effect::SanctionsCheck, Effect::ExternalRead]
+        }
+        // Trade
+        "trade.invoice_create" | "trade.lc_issue" => {
+            vec![Effect::FiscalTransfer, Effect::SovereignWrite]
+        }
+        // Document
+        "document.board_minutes"
+        | "document.shareholder_minutes"
+        | "document.commercial_invoice" => {
+            vec![Effect::DocumentGeneration]
+        }
+        // Filing
+        "filing.registry_amendment" => {
+            vec![Effect::SovereignWrite, Effect::ProofEmit]
+        }
+        // Attestation — ProofEmit only, infallible τ-labelled append.
+        "attestation.append" | "attestation.emit" => vec![Effect::ProofEmit],
+        _ => Vec::new(),
+    }
+}
+
+/// Whether the canonical primitive is deferred-subject class (entity
+/// creation). Mirrors `op_stdlib::is_deferred_subject`.
+pub(crate) fn canonical_is_deferred_subject(name: &str) -> bool {
+    matches!(name, "create.entity")
 }
 
 /// Identify the deferred-subject entity-creation primitive family.
@@ -428,6 +674,93 @@ mod tests {
         assert!(err
             .iter()
             .any(|e| matches!(e, EffectSafetyError::CompensationWithoutCompensableEffect { .. })));
+    }
+
+    #[test]
+    fn expression_host_call_without_gate_rejected() {
+        // §3.9/§4: a write-class effect reachable through a Call expression
+        // in Statement::Return must be dominated by a sanctions check.
+        let prog = program(vec![Statement::Return(OpExpr::Call(
+            "ownership.transfer".to_string(),
+            vec![
+                ("from".to_string(), OpExpr::String("a".to_string())),
+                ("to".to_string(), OpExpr::String("b".to_string())),
+            ],
+        ))]);
+        let err = check_effect_safety(&prog).unwrap_err();
+        assert!(
+            err.iter().any(|e| matches!(
+                e,
+                EffectSafetyError::UndominatedWrite { effect, .. } if *effect == Effect::SovereignWrite
+            )),
+            "expected UndominatedWrite for ownership.transfer; got {err:?}"
+        );
+    }
+
+    #[test]
+    fn expression_host_call_nested_in_match_rejected() {
+        // Embedding the write deep inside Match arms must still be caught.
+        let prog = program(vec![Statement::Return(OpExpr::Match {
+            scrutinee: Box::new(OpExpr::Bool(true)),
+            arms: vec![MatchArm {
+                pattern: "true".to_string(),
+                binding: "_".to_string(),
+                body: OpExpr::Call("fiscal.transfer".to_string(), vec![]),
+            }],
+            catch_all: Box::new(OpExpr::Unit),
+        })]);
+        let err = check_effect_safety(&prog).unwrap_err();
+        assert!(
+            err.iter().any(|e| matches!(
+                e,
+                EffectSafetyError::UndominatedWrite { effect, .. } if *effect == Effect::FiscalTransfer
+            )),
+            "expected UndominatedWrite inside Match; got {err:?}"
+        );
+    }
+
+    #[test]
+    fn expression_level_sanctions_then_write_admitted() {
+        // Sanctions call earlier in the body makes a later write admissible.
+        let prog = program(vec![
+            Statement::Expr(OpExpr::Call(
+                "sanctions.check".to_string(),
+                vec![("principal".to_string(), OpExpr::String("x".to_string()))],
+            )),
+            Statement::Return(OpExpr::Call(
+                "ownership.transfer".to_string(),
+                vec![],
+            )),
+        ]);
+        assert!(check_effect_safety(&prog).is_ok());
+    }
+
+    #[test]
+    fn run_with_write_call_requires_gate() {
+        // A `run` alias to a write-class primitive is equally gated.
+        let prog = program(vec![Statement::Run {
+            name: "cap".to_string(),
+            call: OpExpr::Call("update.cap_table".to_string(), vec![]),
+        }]);
+        let err = check_effect_safety(&prog).unwrap_err();
+        assert!(
+            err.iter().any(|e| matches!(
+                e,
+                EffectSafetyError::UndominatedWrite { effect, .. } if *effect == Effect::SovereignWrite
+            )),
+            "expected UndominatedWrite on Run of update.cap_table; got {err:?}"
+        );
+    }
+
+    #[test]
+    fn deferred_subject_call_expression_allowed() {
+        // An expression-level `create.entity` call carries the deferred-subject
+        // exception just like the statement-level form.
+        let prog = program(vec![Statement::Return(OpExpr::Call(
+            "create.entity".to_string(),
+            vec![],
+        ))]);
+        assert!(check_effect_safety(&prog).is_ok());
     }
 
     #[test]

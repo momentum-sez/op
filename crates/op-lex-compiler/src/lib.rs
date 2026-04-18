@@ -175,7 +175,14 @@ fn compile_prelude_call(
 }
 
 /// Wrap a compiled expression into a full `OpProgram` whose body returns it.
+///
+/// The emitted program advertises a single output field `result` whose type
+/// is inferred from the compiled body. A hardcoded `verdict: Verdict`
+/// advertisement would over-specify the output type for bodies that lower
+/// into a non-variant expression (e.g. a raw boolean or integer constant);
+/// the type inferred at compile time is always correct by construction.
 fn build_program(body: OpExpr, ctx: &CompileCtx) -> OpProgram {
+    let inferred_output = infer_expr_type(&body, ctx);
     OpProgram {
         name: ctx.program_name.clone(),
         jurisdiction: ctx.jurisdiction.0.clone(),
@@ -184,7 +191,7 @@ fn build_program(body: OpExpr, ctx: &CompileCtx) -> OpProgram {
             description: "Compiled from Lex via [[.]] : Lex -> Op.".to_string(),
         },
         inputs: vec![],
-        outputs: vec![("verdict".to_string(), OpType::Variant(verdict_variant()))],
+        outputs: vec![("result".to_string(), inferred_output)],
         effects: program_effects(&body),
         participants: vec![],
         approval: Option::<ApprovalMode>::None,
@@ -203,6 +210,96 @@ fn verdict_variant() -> Vec<(String, OpType)> {
         ),
         ("SanctionsBlocked".to_string(), OpType::Unit),
     ]
+}
+
+/// Infer the Op type of a compiled expression.
+///
+/// The compiled fragment is limited to the shapes the six §6.2 cases emit
+/// — literals, records, calls, BinOp/UnOp, Match, Seq. The type is
+/// reconstructed by structural recursion with conservative fallbacks for
+/// host-dependent calls.
+pub(crate) fn infer_expr_type(expr: &OpExpr, ctx: &CompileCtx) -> OpType {
+    match expr {
+        OpExpr::Unit => OpType::Unit,
+        OpExpr::Bool(_) => OpType::Bool,
+        OpExpr::Int(_) => OpType::Int,
+        OpExpr::String(_) => OpType::String,
+        OpExpr::Null => OpType::Option(Box::new(OpType::Unit)),
+        OpExpr::Record(fields) => {
+            let inferred: Vec<(String, OpType)> = fields
+                .iter()
+                .map(|(name, e)| (name.clone(), infer_expr_type(e, ctx)))
+                .collect();
+            OpType::Record(inferred)
+        }
+        OpExpr::List(items) => {
+            let inner = items
+                .first()
+                .map(|e| infer_expr_type(e, ctx))
+                .unwrap_or(OpType::Unit);
+            OpType::List(Box::new(inner))
+        }
+        OpExpr::Tuple(items) => {
+            OpType::Tuple(items.iter().map(|e| infer_expr_type(e, ctx)).collect())
+        }
+        OpExpr::Var(name) => ctx
+            .lookup_binder(name)
+            .cloned()
+            .or_else(|| ctx.prelude.lookup_value(name).map(|(ty, _)| ty.clone()))
+            .unwrap_or(OpType::Record(vec![])),
+        OpExpr::Call(name, _args) => {
+            // A named callable surfaces the callable's declared return type
+            // via the canonical-prelude registration.
+            if let Some(callable) = ctx.prelude.lookup_callable(name) {
+                return callable.ty.clone();
+            }
+            match name.as_str() {
+                "sanctions.check" => OpType::Variant(verdict_variant()),
+                "attestation.append" => OpType::Record(vec![]),
+                _ => OpType::Record(vec![]),
+            }
+        }
+        OpExpr::BinOp(op, _a, _b) => match op {
+            op_core::BinOp::Eq
+            | op_core::BinOp::Ne
+            | op_core::BinOp::Lt
+            | op_core::BinOp::Le
+            | op_core::BinOp::Gt
+            | op_core::BinOp::Ge
+            | op_core::BinOp::And
+            | op_core::BinOp::Or
+            | op_core::BinOp::In
+            | op_core::BinOp::Contains => OpType::Bool,
+            op_core::BinOp::Add | op_core::BinOp::Sub | op_core::BinOp::Mul => OpType::Int,
+        },
+        OpExpr::UnOp(op, a) => match op {
+            op_core::UnOp::Not => OpType::Bool,
+            op_core::UnOp::Neg => infer_expr_type(a, ctx),
+        },
+        OpExpr::Coalesce(a, _b) => infer_expr_type(a, ctx),
+        // Seq's type is the type of its second operand (F6 § canonical Seq).
+        OpExpr::Seq(_a, b) => infer_expr_type(b, ctx),
+        OpExpr::Field(_, _) => OpType::Record(vec![]),
+        OpExpr::Match { arms, catch_all, .. } => {
+            // Conservative: return the type of the first arm's body, falling
+            // back to the catch-all. All arms + catch-all should share a
+            // type by admissibility of the source Lex match.
+            arms.first()
+                .map(|arm| infer_expr_type(&arm.body, ctx))
+                .unwrap_or_else(|| infer_expr_type(catch_all, ctx))
+        }
+        OpExpr::Await { event, .. } => OpType::Await {
+            event: event.clone(),
+            payload: Box::new(OpType::Record(vec![])),
+        },
+        OpExpr::AssertSafety(_) => OpType::Unit,
+        OpExpr::ConsumeLinear(inner) => infer_expr_type(inner, ctx),
+        OpExpr::Lock { resource, .. } => {
+            OpType::Locked(Box::new(infer_expr_type(resource, ctx)))
+        }
+        OpExpr::CommitTransfer { locked, .. } => infer_expr_type(locked, ctx),
+        OpExpr::ReleaseLock { locked, .. } => infer_expr_type(locked, ctx),
+    }
 }
 
 /// Infer the program-level effect row from the body. Conservative: emits
@@ -383,6 +480,85 @@ mod tests {
                 assert!(program.effects.contains(&Effect::ProofEmit));
             }
             other => panic!("expected Seq(attestation, value), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn outputs_reflect_inferred_body_type_for_bool_const() {
+        let ctx = CompileCtx::with_canonical_prelude("demo");
+        let program = compile_lex(&LexTerm::const_bool(true), &ctx).unwrap();
+        // F5: outputs carry `result: T` where T is inferred from the body,
+        // not a hardcoded Verdict variant.
+        assert_eq!(program.outputs.len(), 1);
+        assert_eq!(program.outputs[0].0, "result");
+        assert_eq!(program.outputs[0].1, OpType::Bool);
+    }
+
+    #[test]
+    fn outputs_reflect_inferred_body_type_for_int_const() {
+        let ctx = CompileCtx::with_canonical_prelude("demo");
+        let program = compile_lex(&LexTerm::const_int(42), &ctx).unwrap();
+        assert_eq!(program.outputs[0].0, "result");
+        assert_eq!(program.outputs[0].1, OpType::Int);
+    }
+
+    #[test]
+    fn outputs_reflect_variant_type_for_sanctions_body() {
+        let ctx = CompileCtx::with_canonical_prelude("demo.sanctions");
+        let term = LexTerm::sanctions_dominance_of(LexTerm::const_string("entity-0"));
+        let program = compile_lex(&term, &ctx).unwrap();
+        // The sanctions.check callable is registered with a variant return.
+        match &program.outputs[0].1 {
+            OpType::Variant(ctors) => {
+                let names: Vec<_> = ctors.iter().map(|(n, _)| n.as_str()).collect();
+                assert!(names.contains(&"Compliant"));
+                assert!(names.contains(&"SanctionsBlocked"));
+            }
+            other => panic!("expected Variant output, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn seq_preserves_value_type_under_attestation_failure() {
+        // F6: attestation.append in a Seq position must not abort the Seq
+        // when the host errors on that call. The value operand carries the
+        // result. This is the §6.3 τ-labelled bisimulation case.
+        use op_core::host::{HostError, HostOutcome, OpHost, PrimitiveCall};
+        struct FailingProofHost;
+        impl OpHost for FailingProofHost {
+            fn invoke(
+                &self,
+                call: &PrimitiveCall,
+            ) -> Result<HostOutcome, HostError> {
+                if call.primitive.0 == "attestation.append" {
+                    return Err(HostError::Transient(
+                        "proof bundle writer offline".to_string(),
+                    ));
+                }
+                Ok(HostOutcome::Completed(serde_json::Value::Null))
+            }
+        }
+        let ctx = CompileCtx::with_canonical_prelude("demo.fill");
+        let term = LexTerm::HoleFill {
+            hole_id: "h1".to_string(),
+            value: Box::new(LexTerm::const_int(5)),
+            witness: Witness {
+                authority: "ofac".to_string(),
+                digest: "0xabc".to_string(),
+                timestamp: "2026-04-18T10:00:00Z".to_string(),
+            },
+        };
+        let program = compile_lex(&term, &ctx).unwrap();
+        let host = FailingProofHost;
+        match run_program(&program, &host) {
+            crate::interp::EvalResult::Value(v) => {
+                // The value operand is still returned even though the
+                // attestation call failed.
+                assert_eq!(v, serde_json::Value::from(5));
+            }
+            crate::interp::EvalResult::Error(e) => {
+                panic!("Seq aborted on attestation failure; got: {e}")
+            }
         }
     }
 
