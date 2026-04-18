@@ -8,13 +8,16 @@ Coq sources backing the formal obligations enumerated in `formal/README.md`.
   lemma as a typecheck smoke test.
 - `CompilationSoundness.v` — verdict preservation for the compilation
   function `[[.]] : Lex -> Op` from the Op paper §6.2, mechanized for
-  the scalar shape of the constant compilation case.
+  the scalar shape of the constant compilation case and for the
+  sanctions-dominance case.
 
 ## What `CompilationSoundness.v` mechanizes
 
-The file formalizes, for the admissible Lex fragment restricted to the
-constant head constructor over first-order scalar values (unit,
-boolean, integer, string):
+### Scalar constant case
+
+For the admissible Lex fragment restricted to the constant head
+constructor over first-order scalar values (unit, boolean, integer,
+string):
 
 1. A minimal Lex AST with first-order scalar base values.
 2. A minimal Op expression AST covering the literal forms the scalar
@@ -39,16 +42,40 @@ boolean, integer, string):
 10. Four end-to-end examples (boolean, integer, string, unit).
 
 The scalar case closes by case analysis on the base value. Both
-directions of the biconditional are discharged with `Qed.`; the
-file type-checks under `coqc` (Rocq Prover 9.1.1) with no errors
+directions of the biconditional are discharged with `Qed.`
+
+### Sanctions-dominance case
+
+For the §6.2 / §6.3 sanctions-dominance rule, restricted to a
+scalar-constant principal:
+
+1. A concrete Lex head `SLT_Sanctions` layered over the scalar
+   constant fragment, plus a concrete Op host-call form
+   `SOE_Call "sanctions.check" · ` taking a single named argument.
+2. The host primitive `host_sanctions : LexValue -> LexValue`
+   axiomatized with a two-element range
+   (`"Compliant"` or `"SanctionsBlocked"`).
+3. Small-step reductions on both sides threading the principal's
+   scalar through the host call before emitting the verdict.
+4. The compilation function `sanct_compile` matching the Rust
+   reference in `crates/op-lex-compiler/src/case_sanctions.rs`.
+5. Injectivity of `lift_value` and the helper
+   `sanct_op_lit_emit_unique` discharging the uniqueness of the
+   scalar emission under the `SOE_Lit` wrapper.
+6. The main biconditional `verdict_preservation_sanctions` closing
+   both directions with `Qed.`.
+7. A two-valued sanity example `sanctions_verdict_is_two_valued`.
+
+The file type-checks under `coqc` (Rocq Prover 9.1.1) with no errors
 and no warnings.
 
 ## Proof obligations
 
 The §6.2 compilation function comprises six cases. The scalar shape
-of the constant case is closed. The remaining work is registered in
-the `Obligations` section at the foot of `CompilationSoundness.v`,
-with a proof-structure comment for each:
+of the constant case and the sanctions-dominance case are closed
+(`Qed.`). Seven obligations remain, registered in the `Obligations`
+section at the foot of `CompilationSoundness.v`, with a
+proof-structure comment for each:
 
 | Obligation | Shape | Strategy |
 |---|---|---|
@@ -58,7 +85,6 @@ with a proof-structure comment for each:
 | Variable | `Var name` | Direct rewrite through the prelude-lookup equation. |
 | Match | `Match scrutinee branches` | Induction on the branch list; base via the constant lemma. |
 | Defeasible | `Defeasible name base exceptions` | Well-founded induction on `(priority DESC, source_position ASC)`. |
-| SanctionsDominance | `SanctionsDominance principal` | Case-split on a deterministic host response. |
 | HoleFill (§6.3) | `HoleFill hole_id filler witness` | Coinduction on a bisimulation relation pairing each Lex state with the Op state reached by unwinding one `tau` attestation-append step. |
 
 Each obligation is written as an `Admitted.` theorem whose signature
@@ -82,12 +108,14 @@ is machine-verified by Rocq 9.1.1.
 ## Relation to the Rust reference
 
 `CompilationSoundness.v` mirrors the Rust definitions in
-`crates/op-lex-compiler/src/lift.rs` (`lift_value`) and
-`crates/op-lex-compiler/src/case_const.rs` (`compile_const`). Each
-Coq definition is the mathematical companion of the corresponding
-Rust function; every scalar base constructor handled by the Rust
-`lift_value` is handled by the Coq `lift_value`, and the shapes
-agree. Extending the Coq mechanization to the remaining shapes and
-cases is a matter of mirroring the other `case_*.rs` files into
-the corresponding inductive relations and discharging the
-obligations registered in the `Obligations` section.
+`crates/op-lex-compiler/src/lift.rs` (`lift_value`),
+`crates/op-lex-compiler/src/case_const.rs` (`compile_const`), and
+`crates/op-lex-compiler/src/case_sanctions.rs` (`compile_sanctions`).
+Each Coq definition is the mathematical companion of the
+corresponding Rust function; every scalar base constructor handled
+by the Rust `lift_value` is handled by the Coq `lift_value`, and
+the sanctions-dominance compilation shape agrees. Extending the
+Coq mechanization to the remaining shapes and cases is a matter of
+mirroring the other `case_*.rs` files into the corresponding
+inductive relations and discharging the obligations registered in
+the `Obligations` section.
