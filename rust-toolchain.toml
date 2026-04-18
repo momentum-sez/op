@@ -1,0 +1,11 @@
+# Rust toolchain pin for reproducible builds of the Op workspace.
+#
+# The workspace MSRV declared in Cargo.toml is 1.76. This file pins the
+# toolchain used by `cargo`, `cargo test`, `cargo clippy`, and CI to a
+# specific stable release so builds on a reviewer machine match the
+# maintainer machine and CI exactly.
+
+[toolchain]
+channel = "1.84.0"
+components = ["rustfmt", "clippy"]
+profile = "minimal"
