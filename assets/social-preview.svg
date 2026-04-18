@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 640" width="1280" height="640">
+  <!-- Background -->
+  <rect width="1280" height="640" fill="#f6f2e9"/>
+
+  <!-- Thin hairline frame -->
+  <rect x="40" y="40" width="1200" height="560" fill="none" stroke="#1b2a4a" stroke-width="1" opacity="0.25"/>
+
+  <!-- Title: Op -->
+  <text x="80" y="220" font-family="'Garamond Premier Pro','Adobe Garamond Pro',Garamond,Georgia,serif"
+        font-size="160" font-weight="400" fill="#1b2a4a" letter-spacing="-2">Op</text>
+
+  <!-- Subtitle -->
+  <text x="82" y="288" font-family="'Garamond Premier Pro','Adobe Garamond Pro',Garamond,Georgia,serif"
+        font-size="36" font-weight="400" font-style="italic" fill="#2c2c2c">
+    A Typed Bytecode for Compliance-Carrying Operations
+  </text>
+
+  <!-- Separator rule under title block -->
+  <line x1="82" y1="330" x2="520" y2="330" stroke="#1b2a4a" stroke-width="1.25" opacity="0.6"/>
+
+  <!-- Right panel: code snippet — a step with sanctions_check + write effect -->
+  <g transform="translate(700,130)">
+    <!-- Panel background -->
+    <rect x="0" y="0" width="500" height="320" fill="#ffffff" stroke="#1b2a4a" stroke-width="1.25" opacity="1"/>
+    <!-- Inner padding area accent -->
+    <rect x="0" y="0" width="500" height="36" fill="#1b2a4a"/>
+    <text x="16" y="24" font-family="'SF Mono','Menlo','Consolas',monospace" font-size="15" fill="#f6f2e9">
+      op-core // step: TransferAsset
+    </text>
+
+    <!-- Code lines (monospace) -->
+    <g font-family="'SF Mono','Menlo','Consolas',monospace" font-size="18" fill="#2c2c2c">
+      <text x="20" y="78"><tspan fill="#8a1e1e">step</tspan> transfer_asset(</text>
+      <text x="20" y="106">  from: Party, to: Party, amt: Money</text>
+      <text x="20" y="134">) {</text>
+      <text x="40" y="162"><tspan fill="#8a1e1e">requires</tspan> sanctions_check(from, to);</text>
+      <text x="40" y="190"><tspan fill="#8a1e1e">requires</tspan> balance(from) &#8805; amt;</text>
+      <text x="40" y="218"><tspan fill="#8a1e1e">effect</tspan>   write ledger[from] -= amt;</text>
+      <text x="40" y="246"><tspan fill="#8a1e1e">effect</tspan>   write ledger[to]   += amt;</text>
+      <text x="40" y="274"><tspan fill="#8a1e1e">emits</tspan>    Transfer { from, to, amt };</text>
+      <text x="20" y="302">}</text>
+    </g>
+  </g>
+
+  <!-- Small caption beside the code panel (left column) -->
+  <g transform="translate(82,380)">
+    <text font-family="'Garamond Premier Pro','Adobe Garamond Pro',Garamond,Georgia,serif"
+          font-size="22" font-weight="400" fill="#2c2c2c">
+      <tspan x="0" dy="0">Pre-conditions, effects, and emitted events</tspan>
+      <tspan x="0" dy="30">typed at compile time. Corridor-composable;</tspan>
+      <tspan x="0" dy="30">3PC-session-typed across sovereign kernels.</tspan>
+    </text>
+  </g>
+
+  <!-- Bottom-left: repo URL (monospace) -->
+  <text x="80" y="572" font-family="'SF Mono','Menlo','Consolas',monospace"
+        font-size="18" fill="#2c2c2c">
+    github.com/momentum-sez/op
+  </text>
+
+  <!-- Bottom-right: license + test count + Coq status -->
+  <text x="1200" y="572" font-family="'Garamond Premier Pro','Adobe Garamond Pro',Garamond,Georgia,serif"
+        font-size="18" fill="#2c2c2c" text-anchor="end">
+    Apache-2.0  &#183;  97 tests  &#183;  6/9 Coq cases Qed
+  </text>
+</svg>
