@@ -1,0 +1,630 @@
+DIGEST e811116339d889cd10c4eca9bf618b8c
+FCompilationSoundness
+R1302:1305 Stdlib.Lists.List <> <> lib
+R1307:1310 Stdlib.Bool.Bool <> <> lib
+R1312:1317 Stdlib.ZArith.ZArith <> <> lib
+R1319:1324 Stdlib.Strings.String <> <> lib
+R1334:1346 Stdlib.Lists.List ListNotations <> mod
+ind 1866:1873 <> LexValue
+constr 1889:1895 <> LV_Unit
+constr 1912:1918 <> LV_Bool
+constr 1945:1950 <> LV_Int
+constr 1978:1983 <> LV_Str
+R1899:1906 CompilationSoundness <> LexValue:1 ind
+R1926:1931 Corelib.Init.Logic <> ::type_scope:x_'->'_x not
+R1922:1925 Corelib.Init.Datatypes <> bool ind
+R1932:1939 CompilationSoundness <> LexValue:1 ind
+R1956:1964 Corelib.Init.Logic <> ::type_scope:x_'->'_x not
+R1955:1955 Corelib.Numbers.BinNums <> Z ind
+R1965:1972 CompilationSoundness <> LexValue:1 ind
+R1994:1997 Corelib.Init.Logic <> ::type_scope:x_'->'_x not
+R1988:1993 Stdlib.Strings.String <> string ind
+R1998:2005 CompilationSoundness <> LexValue:1 ind
+scheme 1866:1873 <> LexValue_rect
+scheme 1866:1873 <> LexValue_ind
+scheme 1866:1873 <> LexValue_rec
+scheme 1866:1873 <> LexValue_sind
+ind 2218:2223 <> OpExpr
+constr 2239:2245 <> OE_Unit
+constr 2260:2266 <> OE_Bool
+constr 2291:2296 <> OE_Int
+constr 2322:2327 <> OE_Str
+R2249:2254 CompilationSoundness <> OpExpr:3 ind
+R2274:2279 Corelib.Init.Logic <> ::type_scope:x_'->'_x not
+R2270:2273 Corelib.Init.Datatypes <> bool ind
+R2280:2285 CompilationSoundness <> OpExpr:3 ind
+R2302:2310 Corelib.Init.Logic <> ::type_scope:x_'->'_x not
+R2301:2301 Corelib.Numbers.BinNums <> Z ind
+R2311:2316 CompilationSoundness <> OpExpr:3 ind
+R2338:2341 Corelib.Init.Logic <> ::type_scope:x_'->'_x not
+R2332:2337 Stdlib.Strings.String <> string ind
+R2342:2347 CompilationSoundness <> OpExpr:3 ind
+scheme 2218:2223 <> OpExpr_rect
+scheme 2218:2223 <> OpExpr_ind
+scheme 2218:2223 <> OpExpr_rec
+scheme 2218:2223 <> OpExpr_sind
+ind 2685:2691 <> LexTerm
+constr 2707:2714 <> LT_Const
+R2726:2729 Corelib.Init.Logic <> ::type_scope:x_'->'_x not
+R2718:2725 CompilationSoundness <> LexValue ind
+R2730:2736 CompilationSoundness <> LexTerm:5 ind
+scheme 2685:2691 <> LexTerm_rect
+scheme 2685:2691 <> LexTerm_ind
+scheme 2685:2691 <> LexTerm_rec
+scheme 2685:2691 <> LexTerm_sind
+def 3086:3095 <> lift_value
+R3102:3109 CompilationSoundness <> LexValue ind
+binder 3098:3098 <> v:7
+R3114:3119 CompilationSoundness <> OpExpr ind
+R3132:3132 CompilationSoundness <> v:7 var
+R3143:3149 CompilationSoundness <> LV_Unit constr
+R3157:3163 CompilationSoundness <> OE_Unit constr
+R3169:3175 CompilationSoundness <> LV_Bool constr
+R3183:3189 CompilationSoundness <> OE_Bool constr
+R3197:3202 CompilationSoundness <> LV_Int constr
+R3211:3216 CompilationSoundness <> OE_Int constr
+R3224:3229 CompilationSoundness <> LV_Str constr
+R3238:3243 CompilationSoundness <> OE_Str constr
+def 3460:3466 <> compile
+R3473:3479 CompilationSoundness <> LexTerm ind
+binder 3469:3469 <> t:9
+R3484:3489 CompilationSoundness <> OpExpr ind
+R3502:3502 CompilationSoundness <> t:9 var
+R3513:3520 CompilationSoundness <> LT_Const constr
+R3527:3536 CompilationSoundness <> lift_value def
+def 3621:3630 <> reflect_op
+R3637:3642 CompilationSoundness <> OpExpr ind
+binder 3633:3633 <> e:11
+R3647:3654 CompilationSoundness <> LexValue ind
+R3667:3667 CompilationSoundness <> e:11 var
+R3678:3684 CompilationSoundness <> OE_Unit constr
+R3691:3697 CompilationSoundness <> LV_Unit constr
+R3703:3709 CompilationSoundness <> OE_Bool constr
+R3716:3722 CompilationSoundness <> LV_Bool constr
+R3730:3735 CompilationSoundness <> OE_Int constr
+R3743:3748 CompilationSoundness <> LV_Int constr
+R3756:3761 CompilationSoundness <> OE_Str constr
+R3769:3774 CompilationSoundness <> LV_Str constr
+prf 3865:3876 <> reflect_lift
+binder 3887:3887 <> v:13
+R3915:3917 Corelib.Init.Logic <> ::type_scope:x_'='_x not
+R3890:3899 CompilationSoundness <> reflect_op def
+R3902:3911 CompilationSoundness <> lift_value def
+R3913:3913 CompilationSoundness <> v:13 var
+R3918:3918 CompilationSoundness <> v:13 var
+prf 3977:3988 <> lift_reflect
+binder 3999:3999 <> e:14
+R4027:4029 Corelib.Init.Logic <> ::type_scope:x_'='_x not
+R4002:4011 CompilationSoundness <> lift_value def
+R4014:4023 CompilationSoundness <> reflect_op def
+R4025:4025 CompilationSoundness <> e:14 var
+R4030:4030 CompilationSoundness <> e:14 var
+ind 4741:4745 <> Label
+constr 4761:4764 <> LTau
+constr 4779:4783 <> LEmit
+R4769:4773 CompilationSoundness <> Label:15 ind
+R4795:4798 Corelib.Init.Logic <> ::type_scope:x_'->'_x not
+R4787:4794 CompilationSoundness <> LexValue ind
+R4799:4803 CompilationSoundness <> Label:15 ind
+scheme 4741:4745 <> Label_rect
+scheme 4741:4745 <> Label_ind
+scheme 4741:4745 <> Label_rec
+scheme 4741:4745 <> Label_sind
+ind 5221:5228 <> lex_step
+constr 5275:5286 <> LexStepConst
+R5239:5242 Corelib.Init.Logic <> ::type_scope:x_'->'_x not
+R5232:5238 CompilationSoundness <> LexTerm ind
+R5248:5251 Corelib.Init.Logic <> ::type_scope:x_'->'_x not
+R5243:5247 CompilationSoundness <> Label ind
+R5259:5262 Corelib.Init.Logic <> ::type_scope:x_'->'_x not
+R5252:5258 CompilationSoundness <> LexTerm ind
+binder 5303:5303 <> v:19
+R5306:5313 CompilationSoundness <> lex_step:17 ind
+R5339:5346 CompilationSoundness <> LT_Const constr
+R5348:5348 CompilationSoundness <> v:19 var
+R5329:5333 CompilationSoundness <> LEmit constr
+R5335:5335 CompilationSoundness <> v:19 var
+R5316:5323 CompilationSoundness <> LT_Const constr
+R5325:5325 CompilationSoundness <> v:19 var
+scheme 5221:5228 <> lex_step_ind
+scheme 5221:5228 <> lex_step_sind
+ind 5574:5580 <> op_step
+constr 5625:5634 <> OpStepUnit
+constr 5688:5697 <> OpStepBool
+constr 5773:5781 <> OpStepInt
+constr 5854:5862 <> OpStepStr
+R5590:5593 Corelib.Init.Logic <> ::type_scope:x_'->'_x not
+R5584:5589 CompilationSoundness <> OpExpr ind
+R5599:5602 Corelib.Init.Logic <> ::type_scope:x_'->'_x not
+R5594:5598 CompilationSoundness <> Label ind
+R5609:5612 Corelib.Init.Logic <> ::type_scope:x_'->'_x not
+R5603:5608 CompilationSoundness <> OpExpr ind
+R5644:5650 CompilationSoundness <> op_step:20 ind
+R5676:5682 CompilationSoundness <> OE_Unit constr
+R5661:5665 CompilationSoundness <> LEmit constr
+R5667:5673 CompilationSoundness <> LV_Unit constr
+R5652:5658 CompilationSoundness <> OE_Unit constr
+binder 5714:5714 <> b:22
+R5717:5723 CompilationSoundness <> op_step:20 ind
+R5758:5764 CompilationSoundness <> OE_Bool constr
+R5766:5766 CompilationSoundness <> b:22 var
+R5738:5742 CompilationSoundness <> LEmit constr
+R5745:5751 CompilationSoundness <> LV_Bool constr
+R5753:5753 CompilationSoundness <> b:22 var
+R5726:5732 CompilationSoundness <> OE_Bool constr
+R5734:5734 CompilationSoundness <> b:22 var
+binder 5798:5798 <> n:23
+R5801:5807 CompilationSoundness <> op_step:20 ind
+R5840:5845 CompilationSoundness <> OE_Int constr
+R5847:5847 CompilationSoundness <> n:23 var
+R5821:5825 CompilationSoundness <> LEmit constr
+R5828:5833 CompilationSoundness <> LV_Int constr
+R5835:5835 CompilationSoundness <> n:23 var
+R5810:5815 CompilationSoundness <> OE_Int constr
+R5817:5817 CompilationSoundness <> n:23 var
+binder 5879:5879 <> s:24
+R5882:5888 CompilationSoundness <> op_step:20 ind
+R5921:5926 CompilationSoundness <> OE_Str constr
+R5928:5928 CompilationSoundness <> s:24 var
+R5902:5906 CompilationSoundness <> LEmit constr
+R5909:5914 CompilationSoundness <> LV_Str constr
+R5916:5916 CompilationSoundness <> s:24 var
+R5891:5896 CompilationSoundness <> OE_Str constr
+R5898:5898 CompilationSoundness <> s:24 var
+scheme 5574:5580 <> op_step_ind
+scheme 5574:5580 <> op_step_sind
+def 6164:6174 <> lex_verdict
+R6181:6187 CompilationSoundness <> LexTerm ind
+binder 6177:6177 <> t:25
+R6195:6202 CompilationSoundness <> LexValue ind
+binder 6191:6191 <> v:26
+R6217:6223 Corelib.Init.Logic <> ::type_scope:'exists'_x_'..'_x_','_x not
+R6226:6227 Corelib.Init.Logic <> ::type_scope:'exists'_x_'..'_x_','_x not
+binder 6224:6225 <> t':27
+R6228:6235 CompilationSoundness <> lex_step ind
+R6249:6250 CompilationSoundness <> t':27 var
+R6240:6244 CompilationSoundness <> LEmit constr
+R6246:6246 CompilationSoundness <> v:26 var
+R6237:6237 CompilationSoundness <> t:25 var
+def 6265:6274 <> op_verdict
+R6281:6286 CompilationSoundness <> OpExpr ind
+binder 6277:6277 <> e:28
+R6294:6301 CompilationSoundness <> LexValue ind
+binder 6290:6290 <> v:29
+R6316:6322 Corelib.Init.Logic <> ::type_scope:'exists'_x_'..'_x_','_x not
+R6325:6326 Corelib.Init.Logic <> ::type_scope:'exists'_x_'..'_x_','_x not
+binder 6323:6324 <> e':30
+R6327:6333 CompilationSoundness <> op_step ind
+R6347:6348 CompilationSoundness <> e':30 var
+R6338:6342 CompilationSoundness <> LEmit constr
+R6344:6344 CompilationSoundness <> v:29 var
+R6335:6335 CompilationSoundness <> e:28 var
+prf 6643:6658 <> lift_value_emits
+binder 6669:6669 <> v:31
+R6672:6678 CompilationSoundness <> op_step ind
+R6706:6715 CompilationSoundness <> lift_value def
+R6717:6717 CompilationSoundness <> v:31 var
+R6696:6700 CompilationSoundness <> LEmit constr
+R6702:6702 CompilationSoundness <> v:31 var
+R6681:6690 CompilationSoundness <> lift_value def
+R6692:6692 CompilationSoundness <> v:31 var
+prf 6854:6876 <> lift_value_emits_unique
+binder 6889:6889 <> v:32
+binder 6891:6891 <> w:33
+binder 6893:6894 <> e':34
+R6936:6943 Corelib.Init.Logic <> ::type_scope:x_'->'_x not
+R6901:6907 CompilationSoundness <> op_step ind
+R6934:6935 CompilationSoundness <> e':34 var
+R6925:6929 CompilationSoundness <> LEmit constr
+R6931:6931 CompilationSoundness <> w:33 var
+R6910:6919 CompilationSoundness <> lift_value def
+R6921:6921 CompilationSoundness <> v:32 var
+R6945:6947 Corelib.Init.Logic <> ::type_scope:x_'='_x not
+R6944:6944 CompilationSoundness <> w:33 var
+R6948:6948 CompilationSoundness <> v:32 var
+prf 7367:7400 <> verdict_preservation_const_forward
+binder 7413:7413 <> v:35
+binder 7415:7416 <> vv:36
+R7450:7457 Corelib.Init.Logic <> ::type_scope:x_'->'_x not
+R7423:7433 CompilationSoundness <> lex_verdict def
+R7448:7449 CompilationSoundness <> vv:36 var
+R7436:7443 CompilationSoundness <> LT_Const constr
+R7445:7445 CompilationSoundness <> v:35 var
+R7458:7467 CompilationSoundness <> op_verdict def
+R7492:7493 CompilationSoundness <> vv:36 var
+R7470:7476 CompilationSoundness <> compile def
+R7479:7486 CompilationSoundness <> LT_Const constr
+R7488:7488 CompilationSoundness <> v:35 var
+R7572:7581 CompilationSoundness <> lift_value def
+R7572:7581 CompilationSoundness <> lift_value def
+R7594:7609 CompilationSoundness <> lift_value_emits thm
+R7594:7609 CompilationSoundness <> lift_value_emits thm
+prf 7751:7785 <> verdict_preservation_const_backward
+binder 7798:7798 <> v:37
+binder 7800:7801 <> vv:38
+R7844:7851 Corelib.Init.Logic <> ::type_scope:x_'->'_x not
+R7808:7817 CompilationSoundness <> op_verdict def
+R7842:7843 CompilationSoundness <> vv:38 var
+R7820:7826 CompilationSoundness <> compile def
+R7829:7836 CompilationSoundness <> LT_Const constr
+R7838:7838 CompilationSoundness <> v:37 var
+R7852:7862 CompilationSoundness <> lex_verdict def
+R7877:7878 CompilationSoundness <> vv:38 var
+R7865:7872 CompilationSoundness <> LT_Const constr
+R7874:7874 CompilationSoundness <> v:37 var
+R7947:7969 CompilationSoundness <> lift_value_emits_unique thm
+R7947:7969 CompilationSoundness <> lift_value_emits_unique thm
+R8016:8023 CompilationSoundness <> LT_Const constr
+R8016:8023 CompilationSoundness <> LT_Const constr
+prf 8163:8188 <> verdict_preservation_const
+binder 8201:8201 <> v:39
+binder 8203:8204 <> vv:40
+R8238:8246 Corelib.Init.Logic <> ::type_scope:x_'<->'_x not
+R8211:8221 CompilationSoundness <> lex_verdict def
+R8236:8237 CompilationSoundness <> vv:40 var
+R8224:8231 CompilationSoundness <> LT_Const constr
+R8233:8233 CompilationSoundness <> v:39 var
+R8247:8256 CompilationSoundness <> op_verdict def
+R8281:8282 CompilationSoundness <> vv:40 var
+R8259:8265 CompilationSoundness <> compile def
+R8268:8275 CompilationSoundness <> LT_Const constr
+R8277:8277 CompilationSoundness <> v:39 var
+R8324:8357 CompilationSoundness <> verdict_preservation_const_forward thm
+R8324:8357 CompilationSoundness <> verdict_preservation_const_forward thm
+R8370:8404 CompilationSoundness <> verdict_preservation_const_backward thm
+R8370:8404 CompilationSoundness <> verdict_preservation_const_backward thm
+prf 8529:8550 <> const_verdict_is_value
+binder 8563:8563 <> v:41
+R8596:8603 Corelib.Init.Logic <> ::type_scope:x_'/\'_x not
+R8570:8580 CompilationSoundness <> lex_verdict def
+R8595:8595 CompilationSoundness <> v:41 var
+R8583:8590 CompilationSoundness <> LT_Const constr
+R8592:8592 CompilationSoundness <> v:41 var
+R8604:8613 CompilationSoundness <> op_verdict def
+R8638:8638 CompilationSoundness <> v:41 var
+R8616:8622 CompilationSoundness <> compile def
+R8625:8632 CompilationSoundness <> LT_Const constr
+R8634:8634 CompilationSoundness <> v:41 var
+R8679:8686 CompilationSoundness <> LT_Const constr
+R8679:8686 CompilationSoundness <> LT_Const constr
+R8724:8733 CompilationSoundness <> lift_value def
+R8724:8733 CompilationSoundness <> lift_value def
+R8745:8760 CompilationSoundness <> lift_value_emits thm
+R8745:8760 CompilationSoundness <> lift_value_emits thm
+prf 8848:8871 <> lex_const_verdict_unique
+binder 8884:8884 <> v:42
+binder 8886:8887 <> va:43
+binder 8889:8890 <> vb:44
+R8924:8931 Corelib.Init.Logic <> ::type_scope:x_'->'_x not
+R8897:8907 CompilationSoundness <> lex_verdict def
+R8922:8923 CompilationSoundness <> va:43 var
+R8910:8917 CompilationSoundness <> LT_Const constr
+R8919:8919 CompilationSoundness <> v:42 var
+R8959:8966 Corelib.Init.Logic <> ::type_scope:x_'->'_x not
+R8932:8942 CompilationSoundness <> lex_verdict def
+R8957:8958 CompilationSoundness <> vb:44 var
+R8945:8952 CompilationSoundness <> LT_Const constr
+R8954:8954 CompilationSoundness <> v:42 var
+R8969:8971 Corelib.Init.Logic <> ::type_scope:x_'='_x not
+R8967:8968 CompilationSoundness <> va:43 var
+R8972:8973 CompilationSoundness <> vb:44 var
+prf 9088:9110 <> op_const_verdict_unique
+binder 9123:9123 <> v:45
+binder 9125:9126 <> va:46
+binder 9128:9129 <> vb:47
+R9172:9179 Corelib.Init.Logic <> ::type_scope:x_'->'_x not
+R9136:9145 CompilationSoundness <> op_verdict def
+R9170:9171 CompilationSoundness <> va:46 var
+R9148:9154 CompilationSoundness <> compile def
+R9157:9164 CompilationSoundness <> LT_Const constr
+R9166:9166 CompilationSoundness <> v:45 var
+R9216:9223 Corelib.Init.Logic <> ::type_scope:x_'->'_x not
+R9180:9189 CompilationSoundness <> op_verdict def
+R9214:9215 CompilationSoundness <> vb:47 var
+R9192:9198 CompilationSoundness <> compile def
+R9201:9208 CompilationSoundness <> LT_Const constr
+R9210:9210 CompilationSoundness <> v:45 var
+R9226:9228 Corelib.Init.Logic <> ::type_scope:x_'='_x not
+R9224:9225 CompilationSoundness <> va:46 var
+R9229:9230 CompilationSoundness <> vb:47 var
+R9308:9330 CompilationSoundness <> lift_value_emits_unique thm
+R9308:9330 CompilationSoundness <> lift_value_emits_unique thm
+R9368:9390 CompilationSoundness <> lift_value_emits_unique thm
+R9368:9390 CompilationSoundness <> lift_value_emits_unique thm
+sec 10224:10234 <> Obligations
+var 10564:10573 Obligations ExtLexTerm
+var 10599:10607 Obligations ExtOpExpr
+var 10634:10643 Obligations ExtCompile
+R10661:10664 Corelib.Init.Logic <> ::type_scope:x_'->'_x not
+R10651:10660 CompilationSoundness <> ExtLexTerm defax
+R10665:10673 CompilationSoundness <> ExtOpExpr defax
+var 10688:10700 Obligations ExtLexVerdict
+R10715:10718 Corelib.Init.Logic <> ::type_scope:x_'->'_x not
+R10705:10714 CompilationSoundness <> ExtLexTerm defax
+R10727:10730 Corelib.Init.Logic <> ::type_scope:x_'->'_x not
+R10719:10726 CompilationSoundness <> LexValue ind
+var 10749:10760 Obligations ExtOpVerdict
+R10775:10779 Corelib.Init.Logic <> ::type_scope:x_'->'_x not
+R10766:10774 CompilationSoundness <> ExtOpExpr defax
+R10788:10791 Corelib.Init.Logic <> ::type_scope:x_'->'_x not
+R10780:10787 CompilationSoundness <> LexValue ind
+var 10811:10820 Obligations ELV_Record
+R10849:10852 Corelib.Init.Logic <> ::type_scope:x_'->'_x not
+R10825:10828 Corelib.Init.Datatypes <> list ind
+R10837:10839 Corelib.Init.Datatypes <> ::type_scope:x_'*'_x not
+R10831:10836 Stdlib.Strings.String <> string ind
+R10840:10847 CompilationSoundness <> LexValue ind
+R10853:10860 CompilationSoundness <> LexValue ind
+var 10875:10882 Obligations ELV_List
+R10902:10905 Corelib.Init.Logic <> ::type_scope:x_'->'_x not
+R10889:10892 Corelib.Init.Datatypes <> list ind
+R10894:10901 CompilationSoundness <> LexValue ind
+R10906:10913 CompilationSoundness <> LexValue ind
+var 10928:10938 Obligations ELV_Variant
+R10948:10951 Corelib.Init.Logic <> ::type_scope:x_'->'_x not
+R10942:10947 Stdlib.Strings.String <> string ind
+R10960:10963 Corelib.Init.Logic <> ::type_scope:x_'->'_x not
+R10952:10959 CompilationSoundness <> LexValue ind
+R10964:10971 CompilationSoundness <> LexValue ind
+var 10986:10994 Obligations ELT_Const
+R11008:11011 Corelib.Init.Logic <> ::type_scope:x_'->'_x not
+R11000:11007 CompilationSoundness <> LexValue ind
+R11012:11021 CompilationSoundness <> ExtLexTerm defax
+var 11037:11043 Obligations ELT_Var
+R11060:11063 Corelib.Init.Logic <> ::type_scope:x_'->'_x not
+R11054:11059 Stdlib.Strings.String <> string ind
+R11064:11073 CompilationSoundness <> ExtLexTerm defax
+var 11088:11096 Obligations ELT_Match
+R11115:11118 Corelib.Init.Logic <> ::type_scope:x_'->'_x not
+R11105:11114 CompilationSoundness <> ExtLexTerm defax
+R11154:11157 Corelib.Init.Logic <> ::type_scope:x_'->'_x not
+R11119:11122 Corelib.Init.Datatypes <> list ind
+R11140:11142 Corelib.Init.Datatypes <> ::type_scope:x_'*'_x not
+R11131:11133 Corelib.Init.Datatypes <> ::type_scope:x_'*'_x not
+R11125:11130 Stdlib.Strings.String <> string ind
+R11134:11139 Stdlib.Strings.String <> string ind
+R11143:11152 CompilationSoundness <> ExtLexTerm defax
+R11158:11167 CompilationSoundness <> ExtLexTerm defax
+var 11182:11195 Obligations ELT_Defeasible
+R11205:11208 Corelib.Init.Logic <> ::type_scope:x_'->'_x not
+R11199:11204 Stdlib.Strings.String <> string ind
+R11219:11222 Corelib.Init.Logic <> ::type_scope:x_'->'_x not
+R11209:11218 CompilationSoundness <> ExtLexTerm defax
+R11265:11268 Corelib.Init.Logic <> ::type_scope:x_'->'_x not
+R11223:11226 Corelib.Init.Datatypes <> list ind
+R11258:11260 Corelib.Init.Datatypes <> ::type_scope:x_'*'_x not
+R11252:11254 Corelib.Init.Datatypes <> ::type_scope:x_'*'_x not
+R11239:11241 Corelib.Init.Datatypes <> ::type_scope:x_'*'_x not
+R11229:11238 CompilationSoundness <> ExtLexTerm defax
+R11242:11251 CompilationSoundness <> ExtLexTerm defax
+R11255:11257 Corelib.Init.Datatypes <> nat ind
+R11261:11263 Corelib.Init.Datatypes <> nat ind
+R11269:11278 CompilationSoundness <> ExtLexTerm defax
+var 11293:11305 Obligations ELT_Sanctions
+R11320:11323 Corelib.Init.Logic <> ::type_scope:x_'->'_x not
+R11310:11319 CompilationSoundness <> ExtLexTerm defax
+R11324:11333 CompilationSoundness <> ExtLexTerm defax
+var 11348:11359 Obligations ELT_HoleFill
+R11371:11374 Corelib.Init.Logic <> ::type_scope:x_'->'_x not
+R11365:11370 Stdlib.Strings.String <> string ind
+R11385:11388 Corelib.Init.Logic <> ::type_scope:x_'->'_x not
+R11375:11384 CompilationSoundness <> ExtLexTerm defax
+R11389:11398 CompilationSoundness <> ExtLexTerm defax
+prf 11820:11852 <> verdict_preservation_const_record
+R11877:11880 Corelib.Init.Datatypes <> list ind
+R11889:11891 Corelib.Init.Datatypes <> ::type_scope:x_'*'_x not
+R11883:11888 Stdlib.Strings.String <> string ind
+R11892:11899 CompilationSoundness <> LexValue ind
+binder 11868:11873 <> fields:76
+R11909:11916 CompilationSoundness <> LexValue ind
+binder 11904:11905 <> vv:77
+R11974:11984 Corelib.Init.Logic <> ::type_scope:x_'<->'_x not
+R11926:11938 CompilationSoundness <> ExtLexVerdict defax
+R11972:11973 CompilationSoundness <> vv:77 var
+R11941:11949 CompilationSoundness <> ELT_Const defax
+R11952:11961 CompilationSoundness <> ELV_Record defax
+R11963:11968 CompilationSoundness <> fields:76 var
+R11985:11996 CompilationSoundness <> ExtOpVerdict defax
+R12044:12045 CompilationSoundness <> vv:77 var
+R12000:12009 CompilationSoundness <> ExtCompile defax
+R12012:12020 CompilationSoundness <> ELT_Const defax
+R12023:12032 CompilationSoundness <> ELV_Record defax
+R12034:12039 CompilationSoundness <> fields:76 var
+prf 12078:12108 <> verdict_preservation_const_list
+R12132:12135 Corelib.Init.Datatypes <> list ind
+R12137:12144 CompilationSoundness <> LexValue ind
+binder 12124:12128 <> elems:78
+R12153:12160 CompilationSoundness <> LexValue ind
+binder 12148:12149 <> vv:79
+R12215:12225 Corelib.Init.Logic <> ::type_scope:x_'<->'_x not
+R12170:12182 CompilationSoundness <> ExtLexVerdict defax
+R12213:12214 CompilationSoundness <> vv:79 var
+R12185:12193 CompilationSoundness <> ELT_Const defax
+R12196:12203 CompilationSoundness <> ELV_List defax
+R12205:12209 CompilationSoundness <> elems:78 var
+R12226:12237 CompilationSoundness <> ExtOpVerdict defax
+R12282:12283 CompilationSoundness <> vv:79 var
+R12241:12250 CompilationSoundness <> ExtCompile defax
+R12253:12261 CompilationSoundness <> ELT_Const defax
+R12264:12271 CompilationSoundness <> ELV_List defax
+R12273:12277 CompilationSoundness <> elems:78 var
+prf 12316:12349 <> verdict_preservation_const_variant
+R12371:12376 Stdlib.Strings.String <> string ind
+binder 12365:12367 <> tag:80
+R12390:12397 CompilationSoundness <> LexValue ind
+binder 12380:12386 <> payload:81
+R12406:12413 CompilationSoundness <> LexValue ind
+binder 12401:12402 <> vv:82
+R12477:12487 Corelib.Init.Logic <> ::type_scope:x_'<->'_x not
+R12423:12435 CompilationSoundness <> ExtLexVerdict defax
+R12475:12476 CompilationSoundness <> vv:82 var
+R12438:12446 CompilationSoundness <> ELT_Const defax
+R12449:12459 CompilationSoundness <> ELV_Variant defax
+R12465:12471 CompilationSoundness <> payload:81 var
+R12461:12463 CompilationSoundness <> tag:80 var
+R12488:12499 CompilationSoundness <> ExtOpVerdict defax
+R12553:12554 CompilationSoundness <> vv:82 var
+R12503:12512 CompilationSoundness <> ExtCompile defax
+R12515:12523 CompilationSoundness <> ELT_Const defax
+R12526:12536 CompilationSoundness <> ELV_Variant defax
+R12542:12548 CompilationSoundness <> payload:81 var
+R12538:12540 CompilationSoundness <> tag:80 var
+prf 13001:13024 <> verdict_preservation_var
+R13047:13052 Stdlib.Strings.String <> string ind
+binder 13040:13043 <> name:83
+R13067:13074 CompilationSoundness <> LexValue ind
+binder 13056:13063 <> resolved:84
+R13121:13131 Corelib.Init.Logic <> ::type_scope:x_'<->'_x not
+R13084:13096 CompilationSoundness <> ExtLexVerdict defax
+R13113:13120 CompilationSoundness <> resolved:84 var
+R13099:13105 CompilationSoundness <> ELT_Var defax
+R13107:13110 CompilationSoundness <> name:83 var
+R13132:13143 CompilationSoundness <> ExtOpVerdict defax
+R13174:13181 CompilationSoundness <> resolved:84 var
+R13147:13156 CompilationSoundness <> ExtCompile defax
+R13159:13165 CompilationSoundness <> ELT_Var defax
+R13167:13170 CompilationSoundness <> name:83 var
+prf 13703:13728 <> verdict_preservation_match
+R13756:13765 CompilationSoundness <> ExtLexTerm defax
+binder 13744:13752 <> scrutinee:85
+R13791:13794 Corelib.Init.Datatypes <> list ind
+R13812:13814 Corelib.Init.Datatypes <> ::type_scope:x_'*'_x not
+R13803:13805 Corelib.Init.Datatypes <> ::type_scope:x_'*'_x not
+R13797:13802 Stdlib.Strings.String <> string ind
+R13806:13811 Stdlib.Strings.String <> string ind
+R13815:13824 CompilationSoundness <> ExtLexTerm defax
+binder 13780:13787 <> branches:86
+R13845:13852 CompilationSoundness <> LexValue ind
+binder 13840:13841 <> vv:87
+R13909:13919 Corelib.Init.Logic <> ::type_scope:x_'<->'_x not
+R13862:13874 CompilationSoundness <> ExtLexVerdict defax
+R13907:13908 CompilationSoundness <> vv:87 var
+R13877:13885 CompilationSoundness <> ELT_Match defax
+R13897:13904 CompilationSoundness <> branches:86 var
+R13887:13895 CompilationSoundness <> scrutinee:85 var
+R13920:13931 CompilationSoundness <> ExtOpVerdict defax
+R13978:13979 CompilationSoundness <> vv:87 var
+R13935:13944 CompilationSoundness <> ExtCompile defax
+R13947:13955 CompilationSoundness <> ELT_Match defax
+R13967:13974 CompilationSoundness <> branches:86 var
+R13957:13965 CompilationSoundness <> scrutinee:85 var
+prf 14465:14495 <> verdict_preservation_defeasible
+R14523:14528 Stdlib.Strings.String <> string ind
+binder 14511:14519 <> rule_name:88
+R14550:14559 CompilationSoundness <> ExtLexTerm defax
+binder 14543:14546 <> base:89
+R14587:14590 Corelib.Init.Datatypes <> list ind
+R14622:14624 Corelib.Init.Datatypes <> ::type_scope:x_'*'_x not
+R14616:14618 Corelib.Init.Datatypes <> ::type_scope:x_'*'_x not
+R14603:14605 Corelib.Init.Datatypes <> ::type_scope:x_'*'_x not
+R14593:14602 CompilationSoundness <> ExtLexTerm defax
+R14606:14615 CompilationSoundness <> ExtLexTerm defax
+R14619:14621 Corelib.Init.Datatypes <> nat ind
+R14625:14627 Corelib.Init.Datatypes <> nat ind
+binder 14574:14583 <> exceptions:90
+R14648:14655 CompilationSoundness <> LexValue ind
+binder 14643:14644 <> vv:91
+R14724:14734 Corelib.Init.Logic <> ::type_scope:x_'<->'_x not
+R14665:14677 CompilationSoundness <> ExtLexVerdict defax
+R14722:14723 CompilationSoundness <> vv:91 var
+R14680:14693 CompilationSoundness <> ELT_Defeasible defax
+R14710:14719 CompilationSoundness <> exceptions:90 var
+R14705:14708 CompilationSoundness <> base:89 var
+R14695:14703 CompilationSoundness <> rule_name:88 var
+R14735:14746 CompilationSoundness <> ExtOpVerdict defax
+R14805:14806 CompilationSoundness <> vv:91 var
+R14750:14759 CompilationSoundness <> ExtCompile defax
+R14762:14775 CompilationSoundness <> ELT_Defeasible defax
+R14792:14801 CompilationSoundness <> exceptions:90 var
+R14787:14790 CompilationSoundness <> base:89 var
+R14777:14785 CompilationSoundness <> rule_name:88 var
+prf 15379:15408 <> verdict_preservation_sanctions
+R15436:15445 CompilationSoundness <> ExtLexTerm defax
+binder 15424:15432 <> principal:92
+R15454:15461 CompilationSoundness <> LexValue ind
+binder 15449:15450 <> vv:93
+R15513:15523 Corelib.Init.Logic <> ::type_scope:x_'<->'_x not
+R15471:15483 CompilationSoundness <> ExtLexVerdict defax
+R15511:15512 CompilationSoundness <> vv:93 var
+R15486:15498 CompilationSoundness <> ELT_Sanctions defax
+R15500:15508 CompilationSoundness <> principal:92 var
+R15524:15535 CompilationSoundness <> ExtOpVerdict defax
+R15577:15578 CompilationSoundness <> vv:93 var
+R15539:15548 CompilationSoundness <> ExtCompile defax
+R15551:15563 CompilationSoundness <> ELT_Sanctions defax
+R15565:15573 CompilationSoundness <> principal:92 var
+prf 16164:16188 <> verdict_preservation_fill
+R16214:16219 Stdlib.Strings.String <> string ind
+binder 16204:16210 <> hole_id:94
+R16232:16241 CompilationSoundness <> ExtLexTerm defax
+binder 16223:16228 <> filler:95
+R16250:16257 CompilationSoundness <> LexValue ind
+binder 16245:16246 <> vv:96
+R16313:16323 Corelib.Init.Logic <> ::type_scope:x_'<->'_x not
+R16267:16279 CompilationSoundness <> ExtLexVerdict defax
+R16311:16312 CompilationSoundness <> vv:96 var
+R16282:16293 CompilationSoundness <> ELT_HoleFill defax
+R16303:16308 CompilationSoundness <> filler:95 var
+R16295:16301 CompilationSoundness <> hole_id:94 var
+R16324:16335 CompilationSoundness <> ExtOpVerdict defax
+R16381:16382 CompilationSoundness <> vv:96 var
+R16339:16348 CompilationSoundness <> ExtCompile defax
+R16351:16362 CompilationSoundness <> ELT_HoleFill defax
+R16372:16377 CompilationSoundness <> filler:95 var
+R16364:16370 CompilationSoundness <> hole_id:94 var
+R16409:16419 CompilationSoundness Obligations <> sec
+def 16650:16672 <> const_bool_true_verdict
+R16678:16688 CompilationSoundness <> lex_verdict def
+R16717:16723 CompilationSoundness <> LV_Bool constr
+R16725:16728 Corelib.Init.Datatypes <> true constr
+R16691:16698 CompilationSoundness <> LT_Const constr
+R16701:16707 CompilationSoundness <> LV_Bool constr
+R16709:16712 Corelib.Init.Datatypes <> true constr
+R16747:16754 CompilationSoundness <> LT_Const constr
+R16757:16763 CompilationSoundness <> LV_Bool constr
+R16765:16768 Corelib.Init.Datatypes <> true constr
+R16747:16754 CompilationSoundness <> LT_Const constr
+R16757:16763 CompilationSoundness <> LV_Bool constr
+R16765:16768 Corelib.Init.Datatypes <> true constr
+def 16800:16832 <> const_int_42_compiles_and_reduces
+R16838:16847 CompilationSoundness <> op_verdict def
+R16883:16888 CompilationSoundness <> LV_Int constr
+R16850:16856 CompilationSoundness <> compile def
+R16859:16866 CompilationSoundness <> LT_Const constr
+R16869:16874 CompilationSoundness <> LV_Int constr
+R16910:16915 CompilationSoundness <> OE_Int constr
+R16910:16915 CompilationSoundness <> OE_Int constr
+def 16949:16974 <> const_str_hello_round_trip
+R17036:17041 Corelib.Init.Logic <> ::type_scope:x_'/\'_x not
+R16980:16990 CompilationSoundness <> lex_verdict def
+R17021:17026 CompilationSoundness <> LV_Str constr
+R16993:17000 CompilationSoundness <> LT_Const constr
+R17003:17008 CompilationSoundness <> LV_Str constr
+R17042:17051 CompilationSoundness <> op_verdict def
+R17092:17097 CompilationSoundness <> LV_Str constr
+R17054:17060 CompilationSoundness <> compile def
+R17063:17070 CompilationSoundness <> LT_Const constr
+R17073:17078 CompilationSoundness <> LV_Str constr
+R17137:17144 CompilationSoundness <> LT_Const constr
+R17147:17152 CompilationSoundness <> LV_Str constr
+R17137:17144 CompilationSoundness <> LT_Const constr
+R17147:17152 CompilationSoundness <> LV_Str constr
+R17190:17195 CompilationSoundness <> OE_Str constr
+R17190:17195 CompilationSoundness <> OE_Str constr
+def 17234:17254 <> const_unit_round_trip
+R17298:17303 Corelib.Init.Logic <> ::type_scope:x_'/\'_x not
+R17260:17270 CompilationSoundness <> lex_verdict def
+R17291:17297 CompilationSoundness <> LV_Unit constr
+R17273:17280 CompilationSoundness <> LT_Const constr
+R17282:17288 CompilationSoundness <> LV_Unit constr
+R17304:17313 CompilationSoundness <> op_verdict def
+R17344:17350 CompilationSoundness <> LV_Unit constr
+R17316:17322 CompilationSoundness <> compile def
+R17325:17332 CompilationSoundness <> LT_Const constr
+R17334:17340 CompilationSoundness <> LV_Unit constr
+R17381:17388 CompilationSoundness <> LT_Const constr
+R17390:17396 CompilationSoundness <> LV_Unit constr
+R17381:17388 CompilationSoundness <> LT_Const constr
+R17390:17396 CompilationSoundness <> LV_Unit constr
+R17424:17430 CompilationSoundness <> OE_Unit constr
+R17424:17430 CompilationSoundness <> OE_Unit constr
