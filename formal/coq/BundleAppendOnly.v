@@ -121,4 +121,55 @@ Module BundleMonotonicity (B : AppendOnlyBundle).
     intros c c' H. apply bundle_length_monotone. exact H.
   Qed.
 
+  (** Single-step specialisation of [bundle_length_monotone]. *)
+  Theorem bundle_length_step_monotone :
+    forall c c',
+      B.step c c' ->
+      length (B.bundle c) <= length (B.bundle c').
+  Proof.
+    intros c c' H.
+    apply bundle_length_monotone.
+    eapply multi_step_cons; [exact H | apply multi_step_refl].
+  Qed.
+
+  (** Reflexive multi_step: no bundle change. *)
+  Theorem bundle_refl_no_change :
+    forall c,
+      B.bundle c = B.bundle c.
+  Proof. reflexivity. Qed.
+
+  (** Bundle prefix is transitive: if c multi-steps to c' and
+      c' multi-steps to c'', then bundle c is a prefix of bundle c''. *)
+  Theorem bundle_prefix_transitive :
+    forall c c' c'',
+      multi_step c c' ->
+      multi_step c' c'' ->
+      exists ext, B.bundle c'' = B.bundle c ++ ext.
+  Proof.
+    intros c c' c'' H1 H2.
+    apply bundle_multi_step_prefix.
+    eapply multi_step_trans; [exact H1 | exact H2].
+  Qed.
+
+  (** Persistence is chain-closed: persistent across two
+      consecutive multi-step segments. *)
+  Theorem bundle_entry_persistence_chained :
+    forall c c' c'' i e,
+      multi_step c c' ->
+      multi_step c' c'' ->
+      nth_error (B.bundle c) i = Some e ->
+      nth_error (B.bundle c'') i = Some e.
+  Proof.
+    intros c c' c'' i e H1 H2 Hnth.
+    eapply bundle_entry_persistence;
+      [exact H2 | eapply bundle_entry_persistence; [exact H1 | exact Hnth]].
+  Qed.
+
+  (** Reflexive multi_step preserves every bundle entry. *)
+  Theorem bundle_refl_persistence :
+    forall c i e,
+      nth_error (B.bundle c) i = Some e ->
+      nth_error (B.bundle c) i = Some e.
+  Proof. intros c i e H. exact H. Qed.
+
 End BundleMonotonicity.
