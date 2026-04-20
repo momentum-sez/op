@@ -349,3 +349,32 @@ Proof.
   apply (subrow_mem _ _ _ Hsub) in Hs1.
   rewrite Hs1 in Hno. discriminate.
 Qed.
+
+(** ** Further monotonicity / congruence properties (2026-04-20) *)
+
+(** has_sanctions is monotone under subrow: if [r1 ⊆ r2] and r1
+    contains sanctions, r2 also contains sanctions. *)
+Lemma has_sanctions_subrow_monotone :
+  forall r1 r2,
+    subrow r1 r2 = true ->
+    has_sanctions r1 = true ->
+    has_sanctions r2 = true.
+Proof.
+  intros r1 r2 Hsub Hs1.
+  unfold has_sanctions in *.
+  apply (subrow_mem _ _ _ Hsub Hs1).
+Qed.
+
+(** subrow is transitive (already named as [subrow_trans] above, but
+    state here for direct citation as an "ordering" property). *)
+Lemma subrow_preorder_trans :
+  forall r1 r2 r3,
+    subrow r1 r2 = true ->
+    subrow r2 r3 = true ->
+    subrow r1 r3 = true.
+Proof. exact subrow_trans. Qed.
+
+(** subrow is reflexive (alias for subrow_refl, surfaced as a
+    preorder axiom). *)
+Lemma subrow_preorder_refl : forall r, subrow r r = true.
+Proof. exact subrow_refl. Qed.
