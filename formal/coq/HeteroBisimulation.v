@@ -233,4 +233,38 @@ Module HeteroBisim
             end).
   Qed.
 
+  (** ** Further adequacy-relation properties (2026-04-20) *)
+
+  (** [carve_out_sound] holds for every heterogeneous relation
+      trivially — the right-hand side is [True] by construction. *)
+  Lemma carve_out_sound_universal : forall R, carve_out_sound R.
+  Proof.
+    intros R c d a d' HR Hstep Hcarve. exact I.
+  Qed.
+
+  (** The adequacy_b_relation is a concrete function-graph relation:
+      [d = compile c] iff [adequacy_b_relation c d]. *)
+  Lemma adequacy_b_relation_iff :
+    forall c d, adequacy_b_relation c d <-> d = compile c.
+  Proof. intros c d. split; intro H; exact H. Qed.
+
+  (** Every Lex configuration is related to its compilation under
+      [adequacy_b_relation] by definition. *)
+  Lemma adequacy_b_relation_compile :
+    forall c, adequacy_b_relation c (compile c).
+  Proof. intros c. unfold adequacy_b_relation. reflexivity. Qed.
+
+  (** [adequacy_b_relation] is deterministic on the Op side:
+      each Lex configuration maps to a unique Op configuration
+      under the relation. *)
+  Lemma adequacy_b_relation_deterministic :
+    forall c d1 d2,
+      adequacy_b_relation c d1 ->
+      adequacy_b_relation c d2 ->
+      d1 = d2.
+  Proof.
+    intros c d1 d2 H1 H2. unfold adequacy_b_relation in *.
+    rewrite H1, H2. reflexivity.
+  Qed.
+
 End HeteroBisim.
