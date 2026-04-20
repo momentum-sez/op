@@ -341,3 +341,44 @@ Proof.
   inversion Ha; subst. inversion Hb; subst.
   exists (mk_par (S pa) (S pb)). repeat split; try constructor; reflexivity.
 Qed.
+
+(** * Further row-structural lemmas (2026-04-20) *)
+
+(** The empty row is subrow of every row. *)
+Lemma subrow_nil : forall r, subrow [] r = true.
+Proof. reflexivity. Qed.
+
+(** A singleton row [e] is subrow of [r] iff [e] is in [r]. *)
+Lemma subrow_singleton :
+  forall e r, subrow [e] r = mem e r.
+Proof.
+  intros e r. simpl. destruct (mem e r); reflexivity.
+Qed.
+
+(** mem decidability: every effect is either in a row or not. *)
+Lemma mem_dec :
+  forall e r, {mem e r = true} + {mem e r = false}.
+Proof.
+  intros e r. destruct (mem e r) eqn:H.
+  - left. reflexivity.
+  - right. reflexivity.
+Qed.
+
+(** If a row is the empty list, then no effect is a member. *)
+Lemma mem_nil_false : forall e, mem e [] = false.
+Proof. intros e. reflexivity. Qed.
+
+(** Row union with an empty row is the row itself on the right. *)
+Lemma runion_nil_right : forall r, runion r [] = r.
+Proof. intros r. unfold runion. rewrite app_nil_r. reflexivity. Qed.
+
+(** Row union with an empty row is the row itself on the left. *)
+Lemma runion_nil_left : forall r, runion [] r = r.
+Proof. intros r. reflexivity. Qed.
+
+(** Row union is associative. *)
+Lemma runion_assoc :
+  forall r1 r2 r3, runion (runion r1 r2) r3 = runion r1 (runion r2 r3).
+Proof.
+  intros r1 r2 r3. unfold runion. rewrite <- app_assoc. reflexivity.
+Qed.
