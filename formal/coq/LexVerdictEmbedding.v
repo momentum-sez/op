@@ -224,6 +224,43 @@ Proof.
   - exists LV_NonCompliant. reflexivity.
 Qed.
 
+(** ** Further properties of lex_rank and verdict_meet (2026-04-20) *)
+
+(** lex_rank is bounded above by 4 (the rank of LV_Compliant). *)
+Theorem lex_rank_bounded : forall v, lex_rank v <= 4.
+Proof. destruct v; simpl; lia. Qed.
+
+(** lex_rank is injective. *)
+Theorem lex_rank_injective : forall v1 v2,
+  lex_rank v1 = lex_rank v2 -> v1 = v2.
+Proof. destruct v1, v2; simpl; intro H; try reflexivity; discriminate. Qed.
+
+(** verdict_meet is idempotent. *)
+Theorem verdict_meet_idempotent : forall v,
+  verdict_meet v v = v.
+Proof. destruct v; reflexivity. Qed.
+
+(** verdict_meet is commutative. *)
+Theorem verdict_meet_comm : forall v1 v2,
+  verdict_meet v1 v2 = verdict_meet v2 v1.
+Proof. destruct v1, v2; reflexivity. Qed.
+
+(** lex_unrank is the left inverse of lex_rank. *)
+Theorem lex_unrank_rank : forall v, lex_unrank (lex_rank v) = v.
+Proof. destruct v; reflexivity. Qed.
+
+(** lex_to_op preserves strict-less-than: if [lex_rank v1 < lex_rank v2]
+    then the image ranks are also in strict order. *)
+Theorem lex_to_op_preserves_strict_order :
+  forall v1 v2,
+    lex_rank v1 < lex_rank v2 ->
+    cell_rank (lex_to_op v1) < cell_rank (lex_to_op v2).
+Proof.
+  intros v1 v2 H.
+  rewrite (lex_to_op_rank_monotone v1), (lex_to_op_rank_monotone v2).
+  lia.
+Qed.
+
 (** The embedding–reverse pair witnesses a structural bijection
     between the Lex five-chain and the non-Sanctioned fragment of the
     Op six-valued operational carrier.  Together with
