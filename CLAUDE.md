@@ -1,5 +1,28 @@
 # CLAUDE.md — Op
 
+<!-- BEGIN ALWAYS-DEEP-SEMANTIC-MERGE (canonical rule — do not remove or edit) -->
+
+## NON-NEGOTIABLE: Always do deep semantic merges — never rewrite
+
+When merging work from another branch, worktree, or agent output into a
+trunk branch: ALWAYS do a deep semantic merge by reviewing each diff
+hunk and deciding per-hunk whether target wins, source wins, or both
+pieces need to be preserved. NEVER do a wholesale file copy. NEVER
+`-s ours`/`-s theirs` as a shortcut. NEVER "one side wins entirely"
+when both sides have modified a file.
+
+For every merge from a non-ancestor branch:
+1. `git diff <target> <source> -- <path>` per file; read every hunk.
+2. Per hunk, decide: target wins / source wins / compose both.
+3. For whole-file divergence, write a unified version; don't pick one.
+4. If genuinely incompatible, STOP and ask the user.
+5. `cp` + commit is valid ONLY for files that exist on one side only.
+6. `-s ours` is valid ONLY when source content is already absorbed.
+
+Violation destroys real engineering work silently and irrecoverably.
+
+<!-- END ALWAYS-DEEP-SEMANTIC-MERGE -->
+
 <!-- BEGIN NO-DESTRUCTIVE-GIT (canonical rule — do not remove or edit) -->
 
 ## NON-NEGOTIABLE: No destructive git — ever
