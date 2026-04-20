@@ -936,3 +936,47 @@ Proof.
     apply ALV_Fill.
     now apply verdict_preservation_fill.
 Qed.
+
+(** ** Further row/cfg structural properties (2026-04-20) *)
+
+(** row_empty has all fields false. *)
+Lemma row_empty_spec :
+  row_prelude row_empty = false /\
+  row_sanctions row_empty = false /\
+  row_commit row_empty = false /\
+  row_release row_empty = false.
+Proof. repeat split; reflexivity. Qed.
+
+(** row_sanctions_only has only row_sanctions = true. *)
+Lemma row_sanctions_only_spec :
+  row_prelude row_sanctions_only = false /\
+  row_sanctions row_sanctions_only = true /\
+  row_commit row_sanctions_only = false /\
+  row_release row_sanctions_only = false.
+Proof. repeat split; reflexivity. Qed.
+
+(** row_commit_only has only row_commit = true. *)
+Lemma row_commit_only_spec :
+  row_prelude row_commit_only = false /\
+  row_sanctions row_commit_only = false /\
+  row_commit row_commit_only = true /\
+  row_release row_commit_only = false.
+Proof. repeat split; reflexivity. Qed.
+
+(** row_release_only has only row_release = true. *)
+Lemma row_release_only_spec :
+  row_prelude row_release_only = false /\
+  row_sanctions row_release_only = false /\
+  row_commit row_release_only = false /\
+  row_release row_release_only = true.
+Proof. repeat split; reflexivity. Qed.
+
+(** row_join is commutative on each component. *)
+Lemma row_join_comm :
+  forall r1 r2, row_join r1 r2 = row_join r2 r1.
+Proof.
+  intros [a1 b1 c1 d1] [a2 b2 c2 d2]. unfold row_join; simpl.
+  rewrite (Bool.orb_comm a1 a2), (Bool.orb_comm b1 b2),
+          (Bool.orb_comm c1 c2), (Bool.orb_comm d1 d2).
+  reflexivity.
+Qed.
