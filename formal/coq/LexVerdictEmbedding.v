@@ -132,6 +132,65 @@ Proof.
   destruct v1, v2; compute; reflexivity.
 Qed.
 
+(** ** Structural bijection on the non-Sanctioned fragment *)
+
+(** Every non-Sanctioned [cell_verdict] has a unique preimage under
+    [lex_to_op].  The reverse projection is a Qed-closed partial
+    inverse that completes the bijection story. *)
+Definition op_to_lex (c : cell_verdict) : option lex_verdict :=
+  match c with
+  | CC_NonCompliant  => Some LV_NonCompliant
+  | CC_Pending       => Some LV_Pending
+  | CC_NotApplicable => Some LV_NotApplicable
+  | CC_Exempt        => Some LV_Exempt
+  | CC_Compliant     => Some LV_Compliant
+  | CC_Sanctioned    => None
+  end.
+
+(** [op_to_lex] is the left inverse of [lex_to_op]. *)
+Theorem op_to_lex_left_inverse :
+  forall v, op_to_lex (lex_to_op v) = Some v.
+Proof. destruct v; reflexivity. Qed.
+
+(** [op_to_lex] is the right inverse of [lex_to_op] on the
+    non-Sanctioned fragment. *)
+Theorem op_to_lex_right_inverse :
+  forall c v,
+    op_to_lex c = Some v ->
+    lex_to_op v = c.
+Proof. destruct c; simpl; intros v H; inversion H; reflexivity. Qed.
+
+(** Sanctioned has no preimage — the reverse projection explicitly
+    signals this with [None]. *)
+Theorem op_to_lex_sanctioned_is_none :
+  op_to_lex CC_Sanctioned = None.
+Proof. reflexivity. Qed.
+
+(** Surjectivity on the non-Sanctioned fragment: every non-Sanctioned
+    [cell_verdict] is in the image of [lex_to_op]. *)
+Theorem lex_to_op_surjective_on_non_sanctioned :
+  forall c,
+    c <> CC_Sanctioned ->
+    exists v, lex_to_op v = c.
+Proof.
+  intros c Hne.
+  destruct c; try congruence.
+  - exists LV_Compliant. reflexivity.
+  - exists LV_Exempt. reflexivity.
+  - exists LV_NotApplicable. reflexivity.
+  - exists LV_Pending. reflexivity.
+  - exists LV_NonCompliant. reflexivity.
+Qed.
+
+(** The embedding–reverse pair witnesses a structural bijection
+    between the Lex five-chain and the non-Sanctioned fragment of the
+    Op six-valued operational carrier.  Together with
+    [lex_to_op_preserves_meet] and [lex_to_op_rank_monotone], this
+    establishes that the two per-coordinate verdict algebras coincide
+    on their shared domain; the Op algebra extends the Lex algebra by
+    exactly one absorbing value, and the extension is a conservative
+    addition with no reinterpretation of the embedded structure. *)
+
 (** ** Summary
 
     [lex_to_op] is an injective, rank-shift-preserving, meet-preserving
