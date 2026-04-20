@@ -15,6 +15,7 @@
 
 Require Import Coq.Lists.List.
 Require Import Coq.Arith.PeanoNat.
+Require Import Coq.micromega.Lia.
 Import ListNotations.
 
 Set Implicit Arguments.
@@ -152,3 +153,82 @@ Qed.
 Theorem content_addressable : forall r1 r2,
   encode r1 = encode r2 -> r1 = r2.
 Proof. apply encode_injective. Qed.
+
+(** * Further canonicity properties (2026-04-20)
+
+    The following theorems sharpen content-addressability with
+    pointwise-decode determinism, range-restriction on the verdict
+    tag, and structural invariance of the canonical field order. *)
+
+(** Verdict encoding is bounded: a valid verdict tag is at most 2. *)
+Theorem verdict_encode_bounded :
+  forall v, verdict_encode v <= 2.
+Proof. destruct v; simpl; auto. Qed.
+
+(** Verdict decode is partial outside the range [0,2]: any input
+    [>= 3] decodes to [None]. *)
+Theorem verdict_decode_out_of_range :
+  forall n, n >= 3 -> verdict_decode n = None.
+Proof.
+  intros n Hge. destruct n as [|[|[|n']]]; try lia.
+  reflexivity.
+Qed.
+
+(** Verdict decode is injective on the valid range. *)
+Theorem verdict_decode_injective :
+  forall n1 n2 v,
+    verdict_decode n1 = Some v ->
+    verdict_decode n2 = Some v ->
+    n1 = n2.
+Proof.
+  intros n1 n2 v H1 H2.
+  destruct n1 as [|[|[|n1']]]; try discriminate;
+    destruct n2 as [|[|[|n2']]]; try discriminate;
+    simpl in *; inversion H1; inversion H2; subst;
+    try reflexivity; try discriminate.
+Qed.
+
+(** Decode is deterministic: a given list has at most one
+    decoding.  Follows from the structural match. *)
+Theorem decode_deterministic :
+  forall ns r1 r2,
+    decode ns = Some r1 ->
+    decode ns = Some r2 ->
+    r1 = r2.
+Proof.
+  intros ns r1 r2 H1 H2. rewrite H1 in H2. inversion H2. reflexivity.
+Qed.
+
+(** A valid encoding has its entity field at list position 0. *)
+Theorem encode_entity_at_zero :
+  forall r, nth_error (encode r) 0 = Some (r_entity r).
+Proof. intros [e o v]. reflexivity. Qed.
+
+(** A valid encoding has its operation field at list position 1. *)
+Theorem encode_op_at_one :
+  forall r, nth_error (encode r) 1 = Some (r_op r).
+Proof. intros [e o v]. reflexivity. Qed.
+
+(** A valid encoding has its verdict-tag at list position 2. *)
+Theorem encode_verdict_at_two :
+  forall r, nth_error (encode r) 2 = Some (verdict_encode (r_verdict r)).
+Proof. intros [e o v]. reflexivity. Qed.
+
+(** Two encodings agreeing at every position are the same encoding. *)
+Theorem encode_pointwise_eq :
+  forall r1 r2,
+    nth_error (encode r1) 0 = nth_error (encode r2) 0 ->
+    nth_error (encode r1) 1 = nth_error (encode r2) 1 ->
+    nth_error (encode r1) 2 = nth_error (encode r2) 2 ->
+    encode r1 = encode r2.
+Proof.
+  intros [e1 o1 v1] [e2 o2 v2] H0 H1 H2.
+  simpl in *. inversion H0; inversion H1; inversion H2; subst.
+  apply verdict_encode_injective in H5. subst. reflexivity.
+Qed.
+
+(** Encoding produces no zero-length list: every valid receipt
+    has a non-empty encoding. *)
+Theorem encode_nonempty :
+  forall r, encode r <> [].
+Proof. intros [e o v]. discriminate. Qed.
