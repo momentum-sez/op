@@ -768,3 +768,29 @@ Proof.
   - apply bsc_invariants_empty.
   - exact H.
 Qed.
+
+(** ** Further structural trace properties (2026-04-20) *)
+
+(** Steps is reflexive (alias). *)
+Theorem steps_refl_ : forall k, steps k k.
+Proof. exact StepsRefl. Qed.
+
+(** A single step gives a length-one trace. *)
+Theorem step_to_steps : forall k k', step k k' -> steps k k'.
+Proof.
+  intros k k' H. eapply StepsCons; [exact H | apply StepsRefl].
+Qed.
+
+(** Steps is transitive. *)
+Theorem steps_trans :
+  forall k1 k2 k3, steps k1 k2 -> steps k2 k3 -> steps k1 k3.
+Proof.
+  intros k1 k2 k3 H1. revert k3.
+  induction H1 as [k|k k' k'' Hstep Hsteps IH]; intros k3 H2.
+  - exact H2.
+  - eapply StepsCons; [exact Hstep | apply IH; exact H2].
+Qed.
+
+(** The empty kappa is reachable from itself (trivial). *)
+Theorem kappa_empty_reachable_from_self : steps kappa_empty kappa_empty.
+Proof. apply StepsRefl. Qed.
