@@ -386,4 +386,31 @@ Module UpToTauCorrected (L : LTS).
     forall R, monotone_subset R (up_to_tau R).
   Proof. exact up_to_tau_inflationary. Qed.
 
+  (** ** Further monotonicity laws (2026-04-20) *)
+
+  (** weak_step is monotone: if c weakly steps to c', and c' tau-steps
+      to c'', then c weakly steps to c''. *)
+  Lemma weak_step_tau_extends_right :
+    forall c a c' c'',
+      weak_step c a c' ->
+      tau_star c' c'' ->
+      weak_step c a c''.
+  Proof. exact weak_step_append_tau. Qed.
+
+  (** tau_star is a preorder: reflexive and transitive. *)
+  Lemma tau_star_preorder_refl : forall c, tau_star c c.
+  Proof. apply tau_star_refl. Qed.
+
+  Lemma tau_star_preorder_trans :
+    forall c c' c'',
+      tau_star c c' -> tau_star c' c'' -> tau_star c c''.
+  Proof. exact tau_star_trans. Qed.
+
+  (** F functor is monotone in its argument (alias). *)
+  Lemma F_monotone_alias :
+    forall R S,
+      monotone_subset R S ->
+      monotone_subset (F R) (F S).
+  Proof. exact F_monotone. Qed.
+
 End UpToTauCorrected.
