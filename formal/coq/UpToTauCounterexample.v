@@ -168,3 +168,31 @@ Proof.
   - left. split; reflexivity.
   - right. split; reflexivity.
 Qed.
+
+(** ** Further counterexample properties (2026-04-20) *)
+
+(** Counterexample states have decidable equality. *)
+Theorem counterex_state_eq_dec :
+  forall s1 s2 : state, {s1 = s2} + {s1 <> s2}.
+Proof. decide equality. Qed.
+
+(** Counterexample actions have decidable equality. *)
+Theorem counterex_action_eq_dec :
+  forall a1 a2 : action, {a1 = a2} + {a1 <> a2}.
+Proof. decide equality. Qed.
+
+(** tau_measure is exactly 0 at both St and Sd. *)
+Theorem counterex_tau_measure_zero_at_sinks :
+  CounterexampleLTS.tau_measure St = 0 /\
+  CounterexampleLTS.tau_measure Sd = 0.
+Proof. split; reflexivity. Qed.
+
+(** Ss has the maximum tau_measure (2) and is the only state at 2. *)
+Theorem counterex_tau_measure_Ss :
+  CounterexampleLTS.tau_measure Ss = 2.
+Proof. reflexivity. Qed.
+
+(** Sd0 sits strictly between Ss and the sinks. *)
+Theorem counterex_tau_measure_Sd0 :
+  CounterexampleLTS.tau_measure Sd0 = 1.
+Proof. reflexivity. Qed.
