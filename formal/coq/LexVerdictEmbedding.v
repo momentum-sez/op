@@ -291,3 +291,34 @@ Qed.
     views at distinct compositional levels, related by Qed-closed
     projections on their shared sub-structures and separated by F144
     outside the Applicable fragment. *)
+
+(** ** Further embedding properties (2026-04-20) *)
+
+(** Decidable equality on lex_verdict. *)
+Lemma lex_verdict_eq_dec :
+  forall v1 v2 : lex_verdict, {v1 = v2} + {v1 <> v2}.
+Proof. decide equality. Qed.
+
+(** The five lex_verdict constructors are pairwise distinct. *)
+Lemma lex_verdict_ctors_distinct :
+  LV_NonCompliant <> LV_Pending /\
+  LV_Pending <> LV_NotApplicable /\
+  LV_NotApplicable <> LV_Exempt /\
+  LV_Exempt <> LV_Compliant.
+Proof. repeat split; discriminate. Qed.
+
+(** lex_to_op is a function (i.e., it's total). *)
+Lemma lex_to_op_total :
+  forall v, exists c, lex_to_op v = c.
+Proof. intros v. exists (lex_to_op v). reflexivity. Qed.
+
+(** Every Lex verdict has a concrete Op image (not CC_Sanctioned). *)
+Theorem lex_verdict_image_non_sanctioned :
+  forall v, lex_to_op v <> CC_Sanctioned.
+Proof. exact lex_to_op_never_sanctioned. Qed.
+
+(** op_to_lex composed with lex_to_op is the identity (left inverse
+    alias surfaced for citation). *)
+Theorem embedding_left_inverse :
+  forall v, op_to_lex (lex_to_op v) = Some v.
+Proof. exact op_to_lex_left_inverse. Qed.
