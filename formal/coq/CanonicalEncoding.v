@@ -232,3 +232,42 @@ Qed.
 Theorem encode_nonempty :
   forall r, encode r <> [].
 Proof. intros [e o v]. discriminate. Qed.
+
+(** ** Further encoding arithmetic (2026-04-20) *)
+
+(** Decoding an empty list is None. *)
+Lemma decode_nil : decode [] = None.
+Proof. reflexivity. Qed.
+
+(** Decoding a one-element list is None. *)
+Lemma decode_singleton : forall n, decode [n] = None.
+Proof. intros n. reflexivity. Qed.
+
+(** Decoding a two-element list is None. *)
+Lemma decode_two : forall n1 n2, decode [n1; n2] = None.
+Proof. intros n1 n2. reflexivity. Qed.
+
+(** Decoding a four-element list is None (too long). *)
+Lemma decode_four : forall n1 n2 n3 n4,
+  decode [n1; n2; n3; n4] = None.
+Proof. intros. reflexivity. Qed.
+
+(** Decoded receipt's verdict_encode matches the verdict tag. *)
+Theorem decode_verdict_roundtrip :
+  forall e o v,
+    decode [e; o; verdict_encode v] = Some (mk_receipt e o v).
+Proof.
+  intros e o v. simpl. rewrite verdict_roundtrip. reflexivity.
+Qed.
+
+(** verdict_decode of verdict_encode is the same verdict (alias). *)
+Lemma verdict_encode_decode : forall v,
+  verdict_decode (verdict_encode v) = Some v.
+Proof. exact verdict_roundtrip. Qed.
+
+(** verdict_encode maps distinct verdicts to distinct tags. *)
+Theorem verdict_encode_distinct :
+  verdict_encode V_Compliant <> verdict_encode V_NonCompliant /\
+  verdict_encode V_NonCompliant <> verdict_encode V_Sanctioned /\
+  verdict_encode V_Compliant <> verdict_encode V_Sanctioned.
+Proof. repeat split; discriminate. Qed.
