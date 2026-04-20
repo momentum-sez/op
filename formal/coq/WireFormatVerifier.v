@@ -525,3 +525,49 @@ Proof. exact encode_injective. Qed.
     The scaled-model mechanization here is a faithful Qed-closed
     reference.  A full-scale extension is a mechanical
     reimplementation at the CBOR layer. *)
+
+(** ** Further verifier structural theorems (2026-04-20) *)
+
+(** parse_error equality is decidable. *)
+Lemma parse_error_eq_dec :
+  forall e1 e2 : parse_error, {e1 = e2} + {e1 <> e2}.
+Proof. decide equality. Qed.
+
+(** verdict_atom equality is decidable. *)
+Lemma verdict_atom_eq_dec :
+  forall v1 v2 : verdict_atom, {v1 = v2} + {v1 <> v2}.
+Proof. decide equality. Qed.
+
+(** receipt equality is decidable (record of nat, nat, verdict_atom). *)
+Lemma receipt_eq_dec : forall r1 r2 : receipt, {r1 = r2} + {r1 <> r2}.
+Proof.
+  intros [e1 o1 v1] [e2 o2 v2].
+  destruct (Nat.eq_dec e1 e2); [| right; congruence].
+  destruct (Nat.eq_dec o1 o2); [| right; congruence].
+  destruct (verdict_atom_eq_dec v1 v2); [| right; congruence].
+  subst. left. reflexivity.
+Qed.
+
+(** verifier_result equality is decidable. *)
+Lemma verifier_result_eq_dec :
+  forall r1 r2 : verifier_result, {r1 = r2} + {r1 <> r2}.
+Proof.
+  intros r1 r2. destruct r1, r2; try (right; discriminate).
+  - destruct (receipt_eq_dec r r0); [subst; left; reflexivity | right; congruence].
+  - destruct (parse_error_eq_dec p p0); [subst; left; reflexivity | right; congruence].
+Qed.
+
+(** atom_encode maps each verdict_atom to a distinct byte. *)
+Theorem atom_encode_distinct :
+  atom_encode Compliant <> atom_encode NonCompliant /\
+  atom_encode NonCompliant <> atom_encode Sanctioned /\
+  atom_encode Compliant <> atom_encode Sanctioned.
+Proof. repeat split; discriminate. Qed.
+
+(** The receipt_tag (60) is pinned. *)
+Theorem receipt_tag_value : receipt_tag = 60.
+Proof. reflexivity. Qed.
+
+(** The format_version (1) is pinned. *)
+Theorem format_version_value : format_version = 1.
+Proof. reflexivity. Qed.
