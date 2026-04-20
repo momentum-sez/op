@@ -131,3 +131,40 @@ Proof.
   pose proof (Hcompat R Ss Sd up_to_tau_F_R_Ss_Sd) as HF.
   exact (F_up_to_tau_R_Ss_Sd_fails HF).
 Qed.
+
+(** * Further counterexample-state properties (2026-04-20) *)
+
+(** The four counterexample states are all distinct. *)
+Theorem counterex_states_distinct :
+  Ss <> St /\ Ss <> Sd0 /\ Ss <> Sd /\
+  St <> Sd0 /\ St <> Sd /\ Sd0 <> Sd.
+Proof. repeat split; discriminate. Qed.
+
+(** tau_measure is strict-monotone along a step. *)
+Theorem counterex_tau_measure_bounded :
+  forall c, CounterexampleLTS.tau_measure c <= 2.
+Proof.
+  intros c. destruct c; simpl; lia.
+Qed.
+
+(** St is a dead-end: no outgoing steps. *)
+Theorem St_no_step : forall a c, ~ Counterex.step St a c.
+Proof. intros a c H. inversion H. Qed.
+
+(** Ss has only one outgoing step (to St at action AA). *)
+Theorem Ss_unique_step :
+  forall a c, Counterex.step Ss a c -> a = AA /\ c = St.
+Proof.
+  intros a c H. inversion H; subst. split; reflexivity.
+Qed.
+
+(** Sd0 has exactly two outgoing steps. *)
+Theorem Sd0_two_steps :
+  forall a c,
+    Counterex.step Sd0 a c ->
+    (a = AA /\ c = St) \/ (a = Atau /\ c = Sd).
+Proof.
+  intros a c H. inversion H; subst.
+  - left. split; reflexivity.
+  - right. split; reflexivity.
+Qed.
