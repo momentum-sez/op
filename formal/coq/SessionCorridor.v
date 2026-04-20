@@ -269,6 +269,110 @@ Proof.
   inversion Hreach; subst; simpl; constructor.
 Qed.
 
+(** * Further structural properties (2026-04-20)
+
+    The following theorems sharpen the ack-harmlessness and
+    deadlock-freedom story with structural properties of
+    [corridor_step], [corridor_steps], and the erasure. *)
+
+(** [corridor_step] is deterministic: every state has at most one
+    successor.  This is the "no silent branching" property of the
+    corridor protocol. *)
+Theorem corridor_step_deterministic :
+  forall (d : Decision) (p q1 q2 : PairState),
+    corridor_step d p q1 ->
+    corridor_step d p q2 ->
+    q1 = q2.
+Proof.
+  intros d p q1 q2 H1 H2.
+  inversion H1; subst; inversion H2; subst; reflexivity.
+Qed.
+
+(** [corridor_steps] is transitive: concatenating two traces
+    yields a trace.  Structural induction on the first trace. *)
+Theorem corridor_steps_trans :
+  forall (d : Decision) (p q r : PairState),
+    corridor_steps d p q ->
+    corridor_steps d q r ->
+    corridor_steps d p r.
+Proof.
+  intros d p q r H1. revert r.
+  induction H1 as [p0 | p0 q0 r0 Hstep Hrest IH]; intros r' H2.
+  - exact H2.
+  - eapply StepsCons; [exact Hstep | apply IH; exact H2].
+Qed.
+
+(** Initiator erasure is idempotent. *)
+Theorem erase_initiator_idempotent :
+  forall s, erase_initiator (erase_initiator s) = erase_initiator s.
+Proof.
+  intros s. destruct s; simpl; reflexivity.
+Qed.
+
+(** Responder erasure is idempotent. *)
+Theorem erase_responder_idempotent :
+  forall s, erase_responder (erase_responder s) = erase_responder s.
+Proof.
+  intros s. destruct s; simpl; reflexivity.
+Qed.
+
+(** Pair erasure is idempotent. *)
+Theorem erase_pair_idempotent :
+  forall p, erase_pair (erase_pair p) = erase_pair p.
+Proof.
+  intros [i r]. unfold erase_pair. simpl.
+  rewrite erase_initiator_idempotent, erase_responder_idempotent.
+  reflexivity.
+Qed.
+
+(** Dual-action is symmetric (if [a] duals [b] then [b] duals [a]). *)
+Theorem dual_action_symmetric :
+  forall a b, dual_action a b -> dual_action b a.
+Proof.
+  intros a b H. inversion H; constructor.
+Qed.
+
+(** Every reachable pair has a decision-locked structure: the
+    decision index [d] is the same at every stage of the trace.
+    Corollary of [reachable_pair]'s inductive shape. *)
+Theorem reachable_decision_locked :
+  forall d d' p,
+    reachable_pair d p ->
+    p = (I5_Ack d', R5_Ack d') ->
+    d = d'.
+Proof.
+  intros d d' p Hreach Heq.
+  destruct p as [i r]. inversion Heq; subst.
+  inversion Hreach; subst. reflexivity.
+Qed.
+
+(** The initial pair is reachable for any decision. *)
+Theorem initial_pair_reachable :
+  forall d, reachable_pair d initial_pair.
+Proof.
+  intros d. unfold initial_pair. apply Reach0.
+Qed.
+
+(** The terminal pair is reachable for any decision. *)
+Theorem terminal_pair_reachable :
+  forall d, reachable_pair d (terminal_pair d).
+Proof.
+  intros d. unfold terminal_pair. apply Reach6.
+Qed.
+
+(** Decision-erasure preserves the ActEnd terminal action. *)
+Theorem erase_initiator_end :
+  forall d, erase_initiator (IEnd d) = IEnd d.
+Proof.
+  intros d. reflexivity.
+Qed.
+
+Theorem erase_responder_end :
+  forall d, erase_responder (REnd d) = REnd d.
+Proof.
+  intros d. reflexivity.
+Qed.
+
 (** * Correspondence to [papers/op.tex]
 
     The six messages in [Message] correspond directly to the six
