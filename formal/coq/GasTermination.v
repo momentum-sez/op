@@ -225,4 +225,36 @@ Module GasTerminationTheory (G : GasStepSemantics).
     rewrite Hgas in Hd. inversion Hd.
   Qed.
 
+  (** ** Further termination structural results (2026-04-20) *)
+
+  (** A trace of length one is just a single step. *)
+  Theorem trace_one_iff_step :
+    forall c c',
+      trace c c' 1 <-> G.step c c'.
+  Proof.
+    intros c c'. split.
+    - intros H. inversion H as [|c1 c2 c3 n Hstep Hrest]; subst.
+      inversion Hrest; subst. exact Hstep.
+    - intros H. apply step_is_trace. exact H.
+  Qed.
+
+  (** trace is deterministic in the 0-length case. *)
+  Theorem trace_zero_target :
+    forall c c', trace c c' 0 -> c = c'.
+  Proof. apply trace_zero_reflexive. Qed.
+
+  (** A single step's gas decreases strictly. *)
+  Theorem step_gas_strict :
+    forall c c', G.step c c' -> G.gas c' < G.gas c.
+  Proof. exact G.gas_decreases. Qed.
+
+  (** No step from a configuration with gas = 0. *)
+  Theorem no_step_at_zero_gas :
+    forall c c', G.gas c = 0 -> ~ G.step c c'.
+  Proof.
+    intros c c' Hgas Hstep.
+    pose proof (G.gas_decreases Hstep) as Hd.
+    rewrite Hgas in Hd. inversion Hd.
+  Qed.
+
 End GasTerminationTheory.
