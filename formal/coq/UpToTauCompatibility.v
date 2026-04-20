@@ -345,4 +345,45 @@ Module UpToTauCorrected (L : LTS).
     - apply up_to_tau_inflationary.
   Qed.
 
+  (** ** Further structural lemmas (2026-04-20) *)
+
+  (** monotone_subset is reflexive. *)
+  Lemma monotone_subset_refl : forall R, monotone_subset R R.
+  Proof. intros R x y H. exact H. Qed.
+
+  (** monotone_subset is transitive. *)
+  Lemma monotone_subset_trans :
+    forall P Q R,
+      monotone_subset P Q ->
+      monotone_subset Q R ->
+      monotone_subset P R.
+  Proof.
+    intros P Q R HPQ HQR x y H. apply HQR. apply HPQ. exact H.
+  Qed.
+
+  (** tau_star is reflexive. *)
+  Lemma tau_star_refl_ : forall c, tau_star c c.
+  Proof. apply tau_star_refl. Qed.
+
+  (** A single tau-step gives a length-one tau_star. *)
+  Lemma tau_single_to_star : forall c c',
+    L.step c L.tau c' -> tau_star c c'.
+  Proof.
+    intros c c' H. eapply tau_star_step; [exact H | apply tau_star_refl].
+  Qed.
+
+  (** weak_step is reflexive in the following sense: a single step
+      is a weak step with empty tau prefixes on both sides. *)
+  Lemma weak_step_direct : forall c a c',
+    L.step c a c' -> weak_step c a c'.
+  Proof. exact step_weak_step. Qed.
+
+  (** Any relation R is a subset of [F (F R)] is not in general true;
+      but idempotent-image-absorbing relations satisfy their
+      inflationary hull.  Named lemma: up_to_tau's inflationary
+      property is the weakest such form. *)
+  Lemma up_to_tau_inflationary_alias :
+    forall R, monotone_subset R (up_to_tau R).
+  Proof. exact up_to_tau_inflationary. Qed.
+
 End UpToTauCorrected.
