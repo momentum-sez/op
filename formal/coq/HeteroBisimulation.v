@@ -267,4 +267,26 @@ Module HeteroBisim
     rewrite H1, H2. reflexivity.
   Qed.
 
+  (** ** Further bisim structural properties (2026-04-20) *)
+
+  (** hetero_weak_bisim on an empty relation is vacuously true. *)
+  Lemma hetero_weak_bisim_empty :
+    hetero_weak_bisim (fun _ _ => False).
+  Proof.
+    unfold hetero_weak_bisim. intros c d H. contradiction.
+  Qed.
+
+  (** The carve_out_sound predicate is universal (True for all R). *)
+  Lemma carve_out_sound_for_any_R :
+    forall R, carve_out_sound R.
+  Proof. exact carve_out_sound_universal. Qed.
+
+  (** adequacy_b_relation is left-total: every Lex configuration has
+      a related Op configuration under the compilation. *)
+  Lemma adequacy_b_relation_left_total :
+    forall c, exists d, adequacy_b_relation c d.
+  Proof.
+    intros c. exists (compile c). apply adequacy_b_relation_compile.
+  Qed.
+
 End HeteroBisim.
