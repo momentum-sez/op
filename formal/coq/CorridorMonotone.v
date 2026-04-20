@@ -164,6 +164,53 @@ Qed.
     inductive (T-Lock, T-Sign, T-Verify, T-Blame, T-Lock-Timeout)
     is parameterized; the user supplies the per-rule extension
     proofs. *)
+(** ** Additional lookup / extension structural lemmas (2026-04-20) *)
+
+(** Lookup on the empty kappa is always [None]. *)
+Lemma lookup_nil : forall V c, lookup (@nil (coord * V)) c = None.
+Proof. reflexivity. Qed.
+
+(** Lookup on a cons whose head matches returns [Some v]. *)
+Lemma lookup_cons_match :
+  forall V (k : kappa V) c v, lookup ((c, v) :: k) c = Some v.
+Proof.
+  intros V k c v. simpl.
+  destruct (coord_eq_dec c c) as [_|Hne]; [reflexivity | contradiction].
+Qed.
+
+(** Lookup on a cons whose head does not match recurses. *)
+Lemma lookup_cons_nomatch :
+  forall V (k : kappa V) c c' v,
+    c <> c' -> lookup ((c', v) :: k) c = lookup k c.
+Proof.
+  intros V k c c' v Hne. simpl.
+  destruct (coord_eq_dec c c') as [Heq|_]; [contradiction | reflexivity].
+Qed.
+
+(** An extension preserves old entries: if [lookup k c = Some v], the
+    extension [(c', v') :: k] also returns [Some v] at [c] (assuming
+    [c <> c']). *)
+Lemma extension_preserves_lookup :
+  forall V (k : kappa V) c c' v v',
+    c <> c' ->
+    lookup k c = Some v ->
+    lookup ((c', v') :: k) c = Some v.
+Proof.
+  intros V k c c' v v' Hne Hl.
+  rewrite lookup_cons_nomatch; [exact Hl | exact Hne].
+Qed.
+
+(** If [c] has [None] in both k1 and k2, and kappa_sub holds, then
+    the [None] is preserved. *)
+Lemma kappa_sub_preserves_absent :
+  forall V (k1 k2 : kappa V) c,
+    kappa_sub k1 k2 ->
+    lookup k1 c = None ->
+    (forall v, lookup k1 c <> Some v).
+Proof.
+  intros V k1 k2 c _ Hnone v Hsome. rewrite Hnone in Hsome. discriminate.
+Qed.
+
 Module Type RuleExtension.
   Parameter V : Type.
   Parameter rule_step : kappa V -> kappa V -> Prop.
