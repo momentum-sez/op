@@ -194,3 +194,35 @@ Proof.
   intros l t K. exists (dual K). reflexivity.
 Qed.
 
+(** ** Further dual algebraic properties (2026-04-20) *)
+
+(** If dual L = dual M, the inner structure is determined by the
+    involution. *)
+Theorem dual_eq_lifts :
+  forall L M, dual L = dual M -> L = M.
+Proof. exact dual_injective. Qed.
+
+(** Dual is a bijection: for every L there's a unique M with dual M = L. *)
+Theorem dual_bijection :
+  forall L, exists! M, dual M = L.
+Proof.
+  intros L. exists (dual L). split.
+  - apply dual_involution.
+  - intros M' HM'. rewrite <- HM'. rewrite dual_involution. reflexivity.
+Qed.
+
+(** L_End is the only "terminal" ltype (no continuations). *)
+Theorem L_End_no_continuation :
+  forall K l t, L_End <> L_Send l t K /\
+                L_End <> L_Recv l t K.
+Proof. split; discriminate. Qed.
+
+(** dual preserves the L_End shape (self-dual). *)
+Theorem dual_preserves_end_shape :
+  forall L, L = L_End <-> dual L = L_End.
+Proof.
+  intros L. split.
+  - intros H. subst. reflexivity.
+  - intros H. rewrite <- (dual_involution L), H. reflexivity.
+Qed.
+
