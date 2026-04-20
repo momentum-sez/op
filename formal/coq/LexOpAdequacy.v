@@ -177,6 +177,52 @@ Proof.
     apply (verdict_preservation_admissible t2). exact H.
 Qed.
 
+(** ** Reflexivity / symmetry / transitivity of verdict agreement
+       (2026-04-20)
+
+    The [lex_op_verdict_agree] relation inherits reflexivity and
+    transitivity from iff-reasoning, collected here as named Qeds
+    to simplify downstream citations. *)
+
+Theorem lex_op_verdict_agree_refl :
+  forall t, lex_op_verdict_agree t (admissible_compile t).
+Proof. exact lex_op_adequacy. Qed.
+
+Theorem lex_op_verdict_agree_symm :
+  forall t1 t2,
+    (forall vv, admissible_lex_verdict t1 vv <->
+                admissible_lex_verdict t2 vv) ->
+    forall vv, admissible_op_verdict (admissible_compile t1) vv <->
+               admissible_op_verdict (admissible_compile t2) vv.
+Proof. exact lex_op_adequacy_congruence. Qed.
+
+(** Verdict-agreement is transitive on the Lex side: if t1 and t2
+    agree extensionally, and t2 and t3 agree extensionally, then t1
+    and t3 agree extensionally on compiled outputs. *)
+Theorem lex_op_verdict_agree_trans_on_lex :
+  forall t1 t2 t3,
+    (forall vv, admissible_lex_verdict t1 vv <->
+                admissible_lex_verdict t2 vv) ->
+    (forall vv, admissible_lex_verdict t2 vv <->
+                admissible_lex_verdict t3 vv) ->
+    forall vv, admissible_op_verdict (admissible_compile t1) vv <->
+               admissible_op_verdict (admissible_compile t3) vv.
+Proof.
+  intros t1 t2 t3 H12 H23 vv.
+  apply lex_op_adequacy_congruence.
+  intros vv'. rewrite (H12 vv'). exact (H23 vv').
+Qed.
+
+(** Op-side faithful observation: if the compilations of t1 and t2
+    observe all the same verdicts, then so do t1 and t2 in Lex. *)
+Theorem lex_op_adequacy_reflects :
+  forall t1 t2,
+    (forall vv, admissible_op_verdict (admissible_compile t1) vv <->
+                admissible_op_verdict (admissible_compile t2) vv) ->
+    forall vv, admissible_lex_verdict t1 vv <->
+               admissible_lex_verdict t2 vv.
+Proof. exact lex_op_adequacy_injective. Qed.
+
 (** ** End-to-end adequacy summary
 
     [lex_op_adequacy] and [lex_op_adequacy_bisim] together
