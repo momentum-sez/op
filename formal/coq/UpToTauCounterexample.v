@@ -196,3 +196,25 @@ Proof. reflexivity. Qed.
 Theorem counterex_tau_measure_Sd0 :
   CounterexampleLTS.tau_measure Sd0 = 1.
 Proof. reflexivity. Qed.
+
+(** ** Further counterexample-LTS theorems (2026-04-20) *)
+
+(** tau_measure strict-decreases along every step (from the axiom). *)
+Theorem counterex_tau_decreases :
+  forall c c',
+    Counterex.step c Atau c' ->
+    CounterexampleLTS.tau_measure c' < CounterexampleLTS.tau_measure c.
+Proof. apply Counterex.tau_decreases. Qed.
+
+(** step is deterministic (from the axiom). *)
+Theorem counterex_step_deterministic :
+  forall c a c1 c2,
+    Counterex.step c a c1 -> Counterex.step c a c2 -> c1 = c2.
+Proof. apply Counterex.step_deterministic. Qed.
+
+(** Ss strictly dominates every other state in tau_measure. *)
+Theorem Ss_dominates_all :
+  CounterexampleLTS.tau_measure St < CounterexampleLTS.tau_measure Ss /\
+  CounterexampleLTS.tau_measure Sd < CounterexampleLTS.tau_measure Ss /\
+  CounterexampleLTS.tau_measure Sd0 < CounterexampleLTS.tau_measure Ss.
+Proof. simpl. repeat split; lia. Qed.
