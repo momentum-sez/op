@@ -63,3 +63,41 @@ Theorem par_confluence_concrete :
 Proof.
   exact OpEffectMonotonicity.par_confluence_diamond.
 Qed.
+
+(** ** Additional concrete citations (2026-04-20) *)
+
+(** Multi-step preservation (corollary of subject reduction).
+    Forwarding citation for downstream reference. *)
+Theorem multi_preservation_concrete :
+  forall (G : OpProgressSubject.context)
+         (e : OpProgressSubject.expr)
+         (T : OpProgressSubject.ty)
+         (e' : OpProgressSubject.expr),
+    OpProgressSubject.has_type G e T ->
+    OpProgressSubject.multi_step e e' ->
+    OpProgressSubject.has_type G e' T.
+Proof.
+  exact OpProgressSubject.op_multi_preservation.
+Qed.
+
+(** Type soundness: well-typed closed terms don't get stuck. *)
+Theorem type_soundness_concrete :
+  forall (e : OpProgressSubject.expr)
+         (T : OpProgressSubject.ty)
+         (e' : OpProgressSubject.expr),
+    OpProgressSubject.has_type [] e T ->
+    OpProgressSubject.multi_step e e' ->
+    OpProgressSubject.value e' \/
+    exists e'', OpProgressSubject.step e' e''.
+Proof.
+  exact OpProgressSubject.op_type_soundness.
+Qed.
+
+(** Gas strict decrease on steps.  Citation for op.tex §2.3. *)
+Theorem gas_decreases_concrete :
+  forall c c',
+    OpConcreteAST.step c c' ->
+    OpConcreteAST.gas c' < OpConcreteAST.gas c.
+Proof.
+  exact OpConcreteAST.gas_decreases.
+Qed.
