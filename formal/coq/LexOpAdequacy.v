@@ -223,6 +223,43 @@ Theorem lex_op_adequacy_reflects :
                admissible_lex_verdict t2 vv.
 Proof. exact lex_op_adequacy_injective. Qed.
 
+(** ** Further adequacy composition laws (2026-04-20) *)
+
+(** Compiling the same term twice yields the same Op expression (by
+    function extensionality of admissible_compile on the same input).
+    Named as an identity alias. *)
+Theorem admissible_compile_deterministic :
+  forall t1 t2 : admissible_lex,
+    t1 = t2 ->
+    admissible_compile t1 = admissible_compile t2.
+Proof. intros t1 t2 H. subst. reflexivity. Qed.
+
+(** If two admissible Lex terms have identical verdicts on EVERY
+    admissible verdict, their compilations have identical verdicts. *)
+Theorem lex_op_verdict_equality_lift :
+  forall t1 t2,
+    (forall vv, admissible_lex_verdict t1 vv =
+                admissible_lex_verdict t2 vv) ->
+    forall vv, admissible_op_verdict (admissible_compile t1) vv <->
+               admissible_op_verdict (admissible_compile t2) vv.
+Proof.
+  intros t1 t2 Heq.
+  apply lex_op_adequacy_congruence.
+  intros vv. rewrite Heq. reflexivity.
+Qed.
+
+(** Agreement is symmetric: if t1 agrees with t2's compilation, t2
+    agrees with t1's compilation (via two applications of adequacy). *)
+Theorem lex_op_agree_symm :
+  forall t1 t2,
+    (forall vv, admissible_lex_verdict t1 vv <->
+                admissible_lex_verdict t2 vv) ->
+    forall vv, admissible_lex_verdict t2 vv <->
+               admissible_lex_verdict t1 vv.
+Proof.
+  intros t1 t2 Heq vv. rewrite (Heq vv). reflexivity.
+Qed.
+
 (** ** End-to-end adequacy summary
 
     [lex_op_adequacy] and [lex_op_adequacy_bisim] together
