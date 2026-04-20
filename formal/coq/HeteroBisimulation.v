@@ -79,6 +79,54 @@ Module WeakTransition (L : LTS).
     split; [exact Hstep|].
     apply tau_star_trans with (c' := c'); assumption.
   Qed.
+
+  (** tau_star is reflexive. *)
+  Lemma tau_star_refl_ : forall c, tau_star c c.
+  Proof. apply tau_star_refl. Qed.
+
+  (** Any single tau-step promotes to a tau_star of length one. *)
+  Lemma tau_to_tau_star : forall c c',
+    L.step c L.tau c' -> tau_star c c'.
+  Proof.
+    intros c c' H. eapply tau_star_step. exact H. constructor.
+  Qed.
+
+  (** tau_star is closed under prepending a single tau-step. *)
+  Lemma tau_star_cons : forall c c' c'',
+    L.step c L.tau c' -> tau_star c' c'' -> tau_star c c''.
+  Proof. exact tau_star_step. Qed.
+
+  (** A weak step is tau-closed at both endpoints. *)
+  Lemma weak_step_tau_both : forall c c' a c'' c''',
+    tau_star c c' ->
+    weak_step c' a c'' ->
+    tau_star c'' c''' ->
+    weak_step c a c'''.
+  Proof.
+    intros c c' a c'' c''' Hl Hw Hr.
+    apply weak_step_tau_left with (c' := c'); [exact Hl|].
+    apply weak_step_tau_right with (c' := c''); [exact Hw | exact Hr].
+  Qed.
+
+  (** A silent (tau) step is a weak step at the tau observable. *)
+  Lemma tau_is_weak : forall c c',
+    L.step c L.tau c' -> weak_step c L.tau c'.
+  Proof.
+    intros c c' H. apply step_weak_step. exact H.
+  Qed.
+
+  (** A tau-reachable configuration is weakly-reachable at tau. *)
+  Lemma tau_star_implies_weak : forall c c',
+    tau_star c c' ->
+    c = c' \/ weak_step c L.tau c'.
+  Proof.
+    intros c c' H. destruct H as [c0 | c0 c1 c2 Hstep Htail].
+    - left. reflexivity.
+    - right. apply weak_step_tau_right with (c' := c1).
+      + apply tau_is_weak. exact Hstep.
+      + exact Htail.
+  Qed.
+
 End WeakTransition.
 
 (** Heterogeneous weak bisimulation with a carve-out set on the Op side. *)
