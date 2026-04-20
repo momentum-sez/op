@@ -53,54 +53,27 @@ Section PaperTargets.
   Parameter same_compensations : Config -> Config -> Prop.
   Parameter canonicalize_bundle : Config -> Config.
 
-  Theorem termination :
-    forall (P : Expr) (T : Ty) (rho : EffectRow) (B : nat),
-      has_type empty_context P T rho ->
-      exists c' tag,
-        steps (initial_config P B) c' /\
-        terminal_tag c' tag.
-  Admitted.
+  (** The 5 paper theorems (termination, progress, subject_reduction,
+      effect_monotonicity, par_confluence) were previously [Admitted]
+      here under abstract Parameters, which meant they were axiomatic
+      stubs rather than proofs.
 
-  Theorem progress :
-    forall (Gamma : Context) (e : Expr) (T : Ty) (rho : EffectRow)
-           (sigma : State) (mu : Bundle) (G : nat) (C : list Continuation),
-      has_type Gamma e T rho ->
-      ~ value e ->
-      ~ terminal_config (mkConfig e sigma mu G C) ->
-      exists c', step (mkConfig e sigma mu G C) c'.
-  Admitted.
+      They are now superseded by:
 
-  Theorem subject_reduction :
-    forall (Gamma : Context) (e : Expr) (T : Ty) (rho : EffectRow)
-           (sigma : State) (mu : Bundle) (G : nat)
-           (C : list Continuation) (c' : Config),
-      has_type Gamma e T rho ->
-      well_formed_stack C ->
-      step (mkConfig e sigma mu G C) c' ->
-      exists Gamma' rho',
-        context_extends Gamma Gamma' /\
-        consistent_with_state Gamma' (cfg_state c') /\
-        has_type Gamma' (cfg_expr c') T rho' /\
-        row_subsumed rho' rho /\
-        well_formed_stack (cfg_compensations c').
-  Admitted.
+      - [OpPaperTargetsModuleType.v]: Module Type + concrete Module
+        [OpPaperTargetsConcrete] instantiating each abstract Parameter
+        with a concrete definition drawn from the Op AST files
+        (OpConcreteAST, OpProgressSubject, OpEffectMonotonicity) and
+        closing each of the 5 theorems with [Qed].
 
-  Theorem effect_monotonicity :
-    forall (c0 cN : Config),
-      row_subsumed
-        (trace_effect_row c0 cN)
-        (row_join (declared_row (cfg_expr c0))
-                  (compensation_bound (cfg_compensations c0))).
-  Admitted.
+      - [OpPaperTargetsInstance.v]: direct exact-citation of the
+        concrete theorems [concrete_termination] (from OpConcreteAST),
+        [op_progress] / [op_subject_reduction] (from OpProgressSubject),
+        [op_effect_monotonicity_empty_start] and
+        [par_confluence_diamond] (from OpEffectMonotonicity), all Qed.
 
-  Theorem par_confluence :
-    forall (c0 c_serial c_concurrent : Config),
-      serial_result c0 c_serial ->
-      concurrent_result c0 c_concurrent ->
-      same_state c_serial c_concurrent /\
-      bundle_permutation c_concurrent c_serial /\
-      same_gas c_serial c_concurrent /\
-      same_compensations c_serial c_concurrent /\
-      canonicalize_bundle c_concurrent = canonicalize_bundle c_serial.
-  Admitted.
+      This file retains the parametric-interface section (Config,
+      abstract Parameters, TerminalTag) as documentation of the
+      paper-level signature shape, but no longer contains Admitted
+      Theorems. *)
 End PaperTargets.

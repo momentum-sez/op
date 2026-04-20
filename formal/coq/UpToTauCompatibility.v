@@ -177,24 +177,23 @@ Module UpToTau (L : LTS).
       — they are used by the replacement development in
       [UpToTauCorrected] below, which closes a corrected
       compatibility theorem with [Qed]. *)
-  Theorem up_to_tau_compatible : compatible up_to_tau.
-  Proof.
-  Admitted.
 
-  (** Soundness: if R progresses up to tau, R is contained in
-      weak bisimilarity (greatest fixed point of F). *)
+  (** [up_to_tau_compatible] RETIRED: the statement [compatible
+      up_to_tau] under the naive orientation is FALSE, mechanically
+      refuted by [UpToTauCounterexample.up_to_tau_not_compatible]
+      (a Qed-closed negative theorem over a concrete 4-state LTS).
+      Do not reintroduce this theorem here — either use
+      [UpToTauCorrected.up_to_tau_compatible_corrected] (Qed-closed
+      under the correct orientation) or cite the counterexample
+      file's refutation. *)
+
   Definition weak_bisim (R : L.conf -> L.conf -> Prop) : Prop :=
     monotone_subset R (F R).
 
-  Theorem up_to_tau_sound :
-    forall R,
-      monotone_subset R (F (up_to_tau R)) ->
-      exists S, weak_bisim S /\ monotone_subset R S.
-  Proof.
-    (** Standard Pous-Sangiorgi corollary of compatibility —
-        deferred pending the corrected compatibility
-        theorem in [UpToTauCorrected]. *)
-  Admitted.
+  (** [up_to_tau_sound] RETIRED: soundness under the naive
+      orientation would require the (false) compatibility theorem
+      above as a lemma.  The corrected form is
+      [UpToTauCorrected.up_to_tau_sound_corrected] (Qed-closed). *)
 
 End UpToTau.
 
