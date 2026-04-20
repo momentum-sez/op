@@ -166,6 +166,76 @@ Proof.
   apply subrow_weaken_left. apply subrow_refl.
 Qed.
 
+(** Subrow commutes with membership: if r1 is a subrow of r2, every
+    element of r1 is in r2. *)
+Lemma subrow_mem : forall r1 r2 e,
+  subrow r1 r2 = true ->
+  mem e r1 = true ->
+  mem e r2 = true.
+Proof.
+  induction r1 as [|a r1 IH]; intros r2 e H Hmem; simpl in *.
+  - discriminate.
+  - apply andb_true_iff in H. destruct H as [Ha Hsub].
+    destruct (effect_eq_dec e a) as [Heq|Hne].
+    + subst. exact Ha.
+    + apply IH; assumption.
+Qed.
+
+(** Subrow is transitive. *)
+Lemma subrow_trans : forall r1 r2 r3,
+  subrow r1 r2 = true ->
+  subrow r2 r3 = true ->
+  subrow r1 r3 = true.
+Proof.
+  induction r1 as [|e r1 IH]; intros r2 r3 H12 H23; simpl in *.
+  - reflexivity.
+  - apply andb_true_iff in H12. destruct H12 as [Hmem Hsub].
+    apply andb_true_iff. split.
+    + apply subrow_mem with (r1 := r2); assumption.
+    + apply IH with (r2 := r2); assumption.
+Qed.
+
+(** Union is the join (least upper bound) of two rows under subrow. *)
+Theorem union_is_join : forall r1 r2 r3,
+  subrow r1 r3 = true ->
+  subrow r2 r3 = true ->
+  subrow (runion r1 r2) r3 = true.
+Proof.
+  intros r1 r2 r3 H1 H2. unfold runion.
+  induction r1 as [|e r1 IH]; simpl in *.
+  - exact H2.
+  - apply andb_true_iff in H1. destruct H1 as [Hmem Hsub].
+    apply andb_true_iff. split.
+    + exact Hmem.
+    + apply IH. exact Hsub.
+Qed.
+
+(** Effect rows form a bounded join-semilattice under (runion, []):
+    runion is associative, commutative, idempotent (pointwise),
+    and is the join; [] is the bottom; subrow is the order
+    (reflexive, transitive, pointwise extensional). *)
+Theorem effect_row_is_bounded_join_semilattice :
+  (forall r, subrow r r = true) /\
+  (forall r1 r2 r3,
+     subrow r1 r2 = true ->
+     subrow r2 r3 = true ->
+     subrow r1 r3 = true) /\
+  (forall r, subrow [] r = true) /\
+  (forall r1 r2, subrow r1 (runion r1 r2) = true) /\
+  (forall r1 r2, subrow r2 (runion r1 r2) = true) /\
+  (forall r1 r2 r3,
+     subrow r1 r3 = true ->
+     subrow r2 r3 = true ->
+     subrow (runion r1 r2) r3 = true).
+Proof.
+  split; [apply subrow_refl|].
+  split; [apply subrow_trans|].
+  split; [intros r; reflexivity|].
+  split; [apply union_upper_bound_left|].
+  split; [apply union_upper_bound_right|].
+  apply union_is_join.
+Qed.
+
 (** -- Bounded lattice structure -- *)
 
 (** Empty row is the bottom. *)
