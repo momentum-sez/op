@@ -100,3 +100,32 @@ Proof.
       * intro observed_verdict.
         apply verdict_preservation_fill.
 Qed.
+
+(** ** Further case-study structure (2026-04-20) *)
+
+(** adgm_difc_sanctions_term has explicit tx prefix. *)
+Lemma adgm_difc_sanctions_term_shape :
+  adgm_difc_sanctions_term =
+  SLT_Sanctions (SLT_Const (LV_Str "tx:adgm-difc-commit")).
+Proof. reflexivity. Qed.
+
+(** The fit-and-proper fill uses the adgm_fit_and_proper_witness. *)
+Lemma adgm_fill_witness :
+  adgm_fit_and_proper_fill =
+  FLT_Fill "fit_and_proper_adgm" (LV_Str "Compliant")
+    adgm_fit_and_proper_witness.
+Proof. reflexivity. Qed.
+
+(** The DIFC fill uses the difc_approved_person_witness. *)
+Lemma difc_fill_witness :
+  difc_approved_person_fill =
+  FLT_Fill "approved_person_difc" (LV_Str "Compliant")
+    difc_approved_person_witness.
+Proof. reflexivity. Qed.
+
+(** The mutual-recognition fill uses the mutual_recognition_witness. *)
+Lemma mutual_recognition_fill_witness :
+  adgm_difc_mutual_recognition_fill =
+  FLT_Fill "MutualRecognition" (LV_Str "BridgeOk")
+    mutual_recognition_witness.
+Proof. reflexivity. Qed.
