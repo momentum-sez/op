@@ -386,3 +386,28 @@ Proof.
   split; [apply cell_meet_sanctioned_right|].
   apply cell_meet_sanctioned_left.
 Qed.
+
+(** ** Further structural properties (2026-04-20) *)
+
+(** Decidable equality on the cell verdict. *)
+Lemma cell_verdict_eq_dec :
+  forall v1 v2 : cell_verdict, {v1 = v2} + {v1 <> v2}.
+Proof. decide equality. Qed.
+
+(** cell_rank is bounded above by 5 (CC_Compliant). *)
+Lemma cell_rank_bounded : forall v, cell_rank v <= 5.
+Proof. destruct v; simpl; lia. Qed.
+
+(** cell_rank is injective: equal ranks imply equal verdicts. *)
+Lemma cell_rank_injective :
+  forall v1 v2, cell_rank v1 = cell_rank v2 -> v1 = v2.
+Proof. destruct v1, v2; simpl; intro H; try reflexivity; discriminate. Qed.
+
+(** Successive cell_verdict constructors are pairwise distinct. *)
+Lemma cell_verdict_ctors_distinct :
+  CC_Sanctioned <> CC_NonCompliant /\
+  CC_NonCompliant <> CC_Pending /\
+  CC_Pending <> CC_NotApplicable /\
+  CC_NotApplicable <> CC_Exempt /\
+  CC_Exempt <> CC_Compliant.
+Proof. repeat split; discriminate. Qed.
