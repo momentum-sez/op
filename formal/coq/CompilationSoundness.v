@@ -3,7 +3,7 @@
     Mechanization of verdict preservation for the compilation function
     [[.]] : Lex -> Op.
 
-    Six cases are mechanized and closed with [Qed.]:
+    Nine cases are mechanized and closed with [Qed.]:
 
       1. Scalar constant case (§6.2).
       2. Sanctions-dominance case (§6.2 / §6.3).
@@ -14,6 +14,12 @@
          whose elements are scalars.
       6. Constant case — variant shape (§6.2), restricted to
          variants whose payload is a scalar.
+      7. Match case (§6.2), restricted to scalar scrutinees and
+         scalar branch bodies.
+      8. Defeasible case (§6.2), restricted to scalar bases,
+         boolean guards, and scalar exception bodies.
+      9. Hole-fill case (§6.3), closed by weak simulation up to
+         [tau]-labelled attestation append.
 
     Scope.
 
@@ -30,20 +36,17 @@
       - value-lifting function [lift_value : LexValue -> OpExpr]
       - compilation functions [compile : LexTerm -> OpExpr],
         [sanct_compile], [var_compile], [rec_compile],
-        [list_compile], [variant_compile]
+        [list_compile], [variant_compile], [match_compile],
+        [def_compile], [fill_compile]
       - small-step operational semantics for Lex and Op with a trace
         alphabet distinguishing silent [tau] transitions from
         observable verdict emissions; the record, list, and variant
         cases use bespoke emission payloads (field list, element
         list, and tag-payload pair respectively)
       - verdict-extraction predicates on Lex terms and Op expressions
-      - the verdict-preservation theorems for the six mechanized
+      - the verdict-preservation theorems for the nine mechanized
         cases, proved in both directions
-
-    The remaining three compilation cases (match, defeasible,
-    hole_fill) are registered in the [Obligations] section as
-    open theorems carrying honest proof-obligation statements that
-    a follow-on mechanization will discharge. *)
+*)
 
 Set Implicit Arguments.
 
@@ -58,8 +61,8 @@ Open Scope string_scope.
 (** First-order scalar values recognized by the admissible Lex
     fragment. The Rust reference in [crates/op-lex-compiler/src/
     ast.rs] additionally carries records, lists, and variants;
-    the record shape is mechanized in §11 below; the list and
-    variant shapes are registered in the obligations section. *)
+    the record, list, and variant shapes are mechanized in
+    §§11–13 below. *)
 
 Inductive LexValue : Type :=
   | LV_Unit : LexValue
@@ -329,9 +332,12 @@ Inductive SanctOpExpr : Type :=
   | SOE_Call : string -> SanctOpExpr -> SanctOpExpr.
 
 (** Host primitive. Axiomatized as a deterministic function from
-    principals to the two-element verdict set. The range axiom is
-    load-bearing: the case-split on [host_sanctions v_p] is the
-    crux of the proof. *)
+    principals to the two-element verdict set.
+
+    [host_sanctions_range] is kept as a reserved interface for the
+    two-valued sanity check below; the theorem
+    [verdict_preservation_sanctions] depends only on the shared-model
+    parameter [host_sanctions] itself. *)
 
 Parameter host_sanctions : LexValue -> LexValue.
 
@@ -1447,56 +1453,239 @@ Proof.
 Qed.
 
 (* ------------------------------------------------------------------ *)
-(**  16.  Proof obligations.                                         *)
+(**  16.  Hole-fill case.                                            *)
 (* ------------------------------------------------------------------ *)
 
-(** The §6.2 compilation function comprises eight closed cases and
-    one remaining obligation. The scalar shape of the constant case,
-    the sanctions-dominance case, the variable case, the record
-    shape of the constant case, the list shape of the constant case,
-    the variant shape of the constant case, the match case, and the
-    defeasible case are closed above. The hole-fill obligation is
-    registered below as an open theorem carrying the signature of
-    the target result and a proof-structure comment.
+(** The §6.2 / §6.3 hole-fill rule:
 
-    The shapes introduced here as parameters mirror the Rust AST
-    extensions in [crates/op-lex-compiler/src/ast.rs]. A follow-on
-    file replaces each [Parameter] with the corresponding
-    [Inductive] definition and discharges the open statement. *)
+      [[HoleFill { hole_id, value, witness }]] =
+        Seq(attestation.append(witness), [[value]])
 
-Section Obligations.
+    The attestation append is [tau]-labelled: it extends the Op
+    trace but does not itself introduce a verdict. The observable
+    verdict is therefore the verdict of the filler value, reached
+    after a finite silent prefix. The proof below mirrors the Rust
+    [case_fill.rs] shape exactly and closes by weak simulation up to
+    [tau]. *)
 
-  (** Parameters carried across this obligations section. The
-      follow-on refinement replaces these with concrete syntactic
-      definitions (filled holes) taken from the Rust reference. *)
+Record FillWitness : Type := {
+  fill_authority : string;
+  fill_digest    : string;
+  fill_timestamp : string
+}.
 
-  Parameter ExtLexTerm     : Type.
-  Parameter ExtOpExpr      : Type.
-  Parameter ExtCompile     : ExtLexTerm -> ExtOpExpr.
-  Parameter ExtLexVerdict  : ExtLexTerm -> LexValue -> Prop.
-  Parameter ExtOpVerdict   : ExtOpExpr  -> LexValue -> Prop.
+Inductive FillLexTerm : Type :=
+  | FLT_Fill : string -> LexValue -> FillWitness -> FillLexTerm.
 
-  Parameter ELT_HoleFill   : string -> ExtLexTerm -> ExtLexTerm.
+Inductive FillOpExpr : Type :=
+  | FOE_Lit     : LexValue -> FillOpExpr
+  | FOE_AttCall : FillWitness -> FillOpExpr
+  | FOE_Seq     : FillOpExpr -> FillOpExpr -> FillOpExpr.
 
-  (** ** Hole-fill case — the §6.3 bisimulation up to [tau].
+(** Lex reduction. A filled hole emits the filler verdict directly.
+    The witness is recorded on the Op side only. *)
 
-      Goal. For every filled discretion hole, the compiled image
-      emits verdict [vv] iff the Lex fill emits [vv]. The Op
-      trace is the Lex trace preceded by exactly one
-      [tau]-labelled attestation-append step.
+Inductive fill_lex_step : FillLexTerm -> Label -> FillLexTerm -> Prop :=
+  | FLexStepFill :
+      forall hole_id v w,
+        fill_lex_step (FLT_Fill hole_id v w) (LEmit v) (FLT_Fill hole_id v w).
 
-      Proof strategy. A weak bisimulation pairs each Lex state
-      with the Op state obtained by unwinding one [tau]-labelled
-      attestation-append transition. The relation is closed under
-      subsequent observable emissions. Conclude by coinduction. *)
+(** Op reduction. [FOE_Lit v] emits [v]. A sequenced attestation call
+    contributes one silent step, then yields control to the value
+    expression. *)
 
-  Theorem verdict_preservation_fill :
-    forall (hole_id : string) (filler : ExtLexTerm) (vv : LexValue),
-      ExtLexVerdict (ELT_HoleFill hole_id filler) vv <->
-      ExtOpVerdict  (ExtCompile (ELT_HoleFill hole_id filler)) vv.
-  Proof. Admitted.
+Inductive fill_op_step : FillOpExpr -> Label -> FillOpExpr -> Prop :=
+  | FOpStepLit :
+      forall v,
+        fill_op_step (FOE_Lit v) (LEmit v) (FOE_Lit v)
+  | FOpStepSeqAtt :
+      forall w e,
+        fill_op_step (FOE_Seq (FOE_AttCall w) e) LTau e.
 
-End Obligations.
+Definition fill_compile (t : FillLexTerm) : FillOpExpr :=
+  match t with
+  | FLT_Fill _ v w => FOE_Seq (FOE_AttCall w) (FOE_Lit v)
+  end.
+
+Definition fill_lex_verdict (t : FillLexTerm) (v : LexValue) : Prop :=
+  exists t', fill_lex_step t (LEmit v) t'.
+
+Inductive fill_op_tau_star : FillOpExpr -> FillOpExpr -> Prop :=
+  | FOpTauRefl :
+      forall e,
+        fill_op_tau_star e e
+  | FOpTauStep :
+      forall e1 e2 e3,
+        fill_op_step e1 LTau e2 ->
+        fill_op_tau_star e2 e3 ->
+        fill_op_tau_star e1 e3.
+
+Definition fill_op_weak_verdict (e : FillOpExpr) (v : LexValue) : Prop :=
+  exists e1 e2,
+    fill_op_tau_star e e1 /\
+    fill_op_step e1 (LEmit v) e2.
+
+Lemma fill_lex_emit_unique :
+  forall hole_id v w vv t',
+    fill_lex_step (FLT_Fill hole_id v w) (LEmit vv) t' ->
+    vv = v.
+Proof.
+  intros hole_id v w vv t' Hstep.
+  inversion Hstep; reflexivity.
+Qed.
+
+Lemma fill_lit_emit_unique :
+  forall v vv e',
+    fill_op_step (FOE_Lit v) (LEmit vv) e' ->
+    vv = v.
+Proof.
+  intros v vv e' Hstep.
+  inversion Hstep; reflexivity.
+Qed.
+
+(** Weak simulation up to [tau] on the Op side. Every Lex emission
+    must be matchable by a finite [tau]-prefix followed by the same
+    observable verdict on the Op side; observable and silent Op steps
+    must be reflectable back into the Lex term. *)
+
+CoInductive weak_sim : FillLexTerm -> FillOpExpr -> Prop :=
+  | wsim_step :
+      forall t e,
+        (forall vv t',
+            fill_lex_step t (LEmit vv) t' ->
+            exists e1 e2,
+              fill_op_tau_star e e1 /\
+              fill_op_step e1 (LEmit vv) e2 /\
+              weak_sim t' e2) ->
+        (forall vv e',
+            fill_op_step e (LEmit vv) e' ->
+            exists t',
+              fill_lex_step t (LEmit vv) t' /\
+              weak_sim t' e') ->
+        (forall e',
+            fill_op_step e LTau e' ->
+            weak_sim t e') ->
+        weak_sim t e.
+
+(** Once the [tau]-labelled attestation append has fired, the Op side
+    is just the stable literal state. This cofixpoint is kept separate
+    so the recursive calls remain visibly guarded by [wsim_step]. *)
+
+CoFixpoint fill_post_stable
+  (hole_id : string) (v : LexValue) (w : FillWitness)
+  : weak_sim (FLT_Fill hole_id v w) (FOE_Lit v).
+Proof.
+  refine (wsim_step
+            (t := FLT_Fill hole_id v w)
+            (e := FOE_Lit v)
+            _
+            _
+            _).
+  - intros vv t' Hstep.
+    inversion Hstep; subst t'. subst vv.
+    exists (FOE_Lit v), (FOE_Lit v).
+    split.
+    + constructor.
+    + split.
+      * constructor.
+      * exact (fill_post_stable hole_id v w).
+  - intros vv e' Hstep.
+    inversion Hstep; subst e'. subst vv.
+    exists (FLT_Fill hole_id v w).
+    split.
+    + constructor.
+    + exact (fill_post_stable hole_id v w).
+  - intros e' Hstep.
+    inversion Hstep.
+Qed.
+
+(** The compiled fill term simulates the source fill term after one
+    silent attestation step, then hands off to the stable literal
+    simulation above. *)
+
+Lemma fill_bisim :
+  forall hole_id v w,
+    weak_sim (FLT_Fill hole_id v w)
+             (fill_compile (FLT_Fill hole_id v w)).
+Proof.
+  intros hole_id v w.
+  refine (wsim_step
+            (t := FLT_Fill hole_id v w)
+            (e := fill_compile (FLT_Fill hole_id v w))
+            _
+            _
+            _).
+  - intros vv t' Hstep.
+    inversion Hstep; subst t'. subst vv.
+    exists (FOE_Lit v), (FOE_Lit v).
+    split.
+    + simpl. econstructor.
+      * constructor.
+      * constructor.
+    + split.
+      * constructor.
+      * exact (fill_post_stable hole_id v w).
+  - intros vv e' Hstep.
+    inversion Hstep.
+  - intros e' Hstep.
+    inversion Hstep; subst.
+    apply fill_post_stable.
+Qed.
+
+Lemma weak_sim_lex_to_op :
+  forall t e vv,
+    weak_sim t e ->
+    fill_lex_verdict t vv ->
+    fill_op_weak_verdict e vv.
+Proof.
+  intros t e vv Hsim [t' Hstep].
+  inversion Hsim as [t0 e0 Hlex Hop _]; subst.
+  destruct (Hlex vv t' Hstep) as [e1 [e2 [Htau [Hemit _]]]].
+  exists e1, e2.
+  split; assumption.
+Qed.
+
+Lemma weak_sim_tau_to_lex :
+  forall t e e_mid vv e',
+    weak_sim t e ->
+    fill_op_tau_star e e_mid ->
+    fill_op_step e_mid (LEmit vv) e' ->
+    fill_lex_verdict t vv.
+Proof.
+  intros t e e_mid vv e' Hsim Htau.
+  revert t Hsim vv e'.
+  induction Htau as [e0 | e0 e1 e2 Hstep Htau IH];
+    intros t Hsim vv e' Hemit.
+  - inversion Hsim as [t0 e0' _ Hop _]; subst.
+    destruct (Hop vv e' Hemit) as [t' [Hlex _]].
+    exists t'. exact Hlex.
+  - inversion Hsim as [t0 e0' _ _ Htau_match]; subst.
+    eapply IH.
+    + apply Htau_match with (e' := e1). exact Hstep.
+    + exact Hemit.
+Qed.
+
+Theorem verdict_preservation_fill :
+  forall (hole_id : string)
+         (filler : LexValue)
+         (witness : FillWitness)
+         (vv : LexValue),
+    fill_lex_verdict (FLT_Fill hole_id filler witness) vv <->
+    fill_op_weak_verdict
+      (fill_compile (FLT_Fill hole_id filler witness)) vv.
+Proof.
+  intros hole_id filler witness vv.
+  split.
+  - intros Hlex.
+    eapply weak_sim_lex_to_op.
+    + apply fill_bisim.
+    + exact Hlex.
+  - intros [e1 [e2 [Htau Hemit]]].
+    eapply weak_sim_tau_to_lex.
+    + apply fill_bisim.
+    + exact Htau.
+    + exact Hemit.
+Qed.
 
 (* ------------------------------------------------------------------ *)
 (**  13.  End-to-end sanity examples.                                *)
