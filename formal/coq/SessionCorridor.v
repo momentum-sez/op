@@ -373,6 +373,35 @@ Proof.
   intros d. reflexivity.
 Qed.
 
+(** * Decidable equality + ctor distinctness (2026-04-20) *)
+
+Lemma decision_eq_dec : forall d1 d2 : Decision, {d1 = d2} + {d1 <> d2}.
+Proof. decide equality. Qed.
+
+Lemma message_eq_dec : forall m1 m2 : Message, {m1 = m2} + {m1 <> m2}.
+Proof. decide equality; apply decision_eq_dec. Qed.
+
+Lemma initiator_state_eq_dec :
+  forall s1 s2 : InitiatorState, {s1 = s2} + {s1 <> s2}.
+Proof. decide equality; apply decision_eq_dec. Qed.
+
+Lemma responder_state_eq_dec :
+  forall s1 s2 : ResponderState, {s1 = s2} + {s1 <> s2}.
+Proof. decide equality; apply decision_eq_dec. Qed.
+
+Lemma pair_state_eq_dec :
+  forall p1 p2 : PairState, {p1 = p2} + {p1 <> p2}.
+Proof.
+  intros [i1 r1] [i2 r2].
+  destruct (initiator_state_eq_dec i1 i2); [| right; congruence].
+  destruct (responder_state_eq_dec r1 r2); [| right; congruence].
+  subst; left; reflexivity.
+Qed.
+
+(** Commit and Abort decisions are distinct. *)
+Lemma commit_neq_abort : Commit <> Abort.
+Proof. discriminate. Qed.
+
 (** * Correspondence to [papers/op.tex]
 
     The six messages in [Message] correspond directly to the six
