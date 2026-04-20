@@ -99,6 +99,66 @@ Proof.
   apply kappa_sub_cons. exact Hnone.
 Qed.
 
+(** ** Additional kappa_sub properties *)
+
+(** The empty kappa is a subset of every kappa. *)
+Lemma kappa_sub_empty : forall V (k : kappa V),
+  kappa_sub (@nil (coord * V)) k.
+Proof.
+  intros V k c v H. simpl in H. discriminate.
+Qed.
+
+(** If [k1 ⊑ k2], then prepending the same cell on both preserves
+    the sub relation (provided the new coord is fresh in both). *)
+Lemma kappa_sub_cons_cong :
+  forall V (k1 k2 : kappa V) c v,
+    kappa_sub k1 k2 ->
+    kappa_sub ((c, v) :: k1) ((c, v) :: k2).
+Proof.
+  intros V k1 k2 c v Hsub c' v' Hlk.
+  simpl in *.
+  destruct (coord_eq_dec c' c) as [Heq | Hneq].
+  - exact Hlk.
+  - apply Hsub. exact Hlk.
+Qed.
+
+(** An extended kappa contains the extension cell. *)
+Lemma extends_with_contains_cell :
+  forall V (k k' : kappa V) c v,
+    extends_with k k' c v ->
+    lookup k' c = Some v.
+Proof.
+  intros V k k' c v [Hk' Hnone]. subst k'. simpl.
+  destruct (coord_eq_dec c c) as [_ | Hne]; [reflexivity | contradiction].
+Qed.
+
+(** Two consecutive extensions yield a sub chain from the initial
+    kappa to the final kappa. *)
+Lemma extends_with_chain_implies_sub :
+  forall V (k1 k2 k3 : kappa V) c2 v2 c3 v3,
+    extends_with k1 k2 c2 v2 ->
+    extends_with k2 k3 c3 v3 ->
+    kappa_sub k1 k3.
+Proof.
+  intros V k1 k2 k3 c2 v2 c3 v3 H12 H23.
+  apply kappa_sub_trans with (k2 := k2).
+  - eapply extends_with_implies_sub. exact H12.
+  - eapply extends_with_implies_sub. exact H23.
+Qed.
+
+(** If the same coord maps to two different values in two related
+    kappas under [kappa_sub], that's impossible: values agree. *)
+Lemma kappa_sub_lookup_functional :
+  forall V (k1 k2 : kappa V) c v1 v2,
+    kappa_sub k1 k2 ->
+    lookup k1 c = Some v1 ->
+    lookup k2 c = Some v2 ->
+    v1 = v2.
+Proof.
+  intros V k1 k2 c v1 v2 Hsub Hl1 Hl2.
+  apply Hsub in Hl1. rewrite Hl1 in Hl2. inversion Hl2. reflexivity.
+Qed.
+
 (** The corridor-history monotonicity lemma, stated abstractly:
     every typing-rule reduction extends kappa.  The actual rule
     inductive (T-Lock, T-Sign, T-Verify, T-Blame, T-Lock-Timeout)
