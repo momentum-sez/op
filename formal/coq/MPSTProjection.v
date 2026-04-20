@@ -188,3 +188,112 @@ Proof.
   - simpl. apply bilateral_duality_sym.
   - simpl. apply bilateral_duality.
 Qed.
+
+(** * Concrete G_corridor with ack alphabet
+
+    The paper's G_corridor global type in [papers/op.tex] Section
+    8.1 (lines 4986-4998 and 5022-5030) pins a six-message
+    alphabet: TensorRequest, Locked, Verdict_I, Verdict_R, Commit
+    | Abort, Commit_Ack | Abort_Ack.  This module instantiates
+    the abstract bilateral projection at a concrete alphabet,
+    including the Commit_Ack / Abort_Ack rung, so that the paper's
+    alphabet is witnessed Qed-closed at this layer (and matches
+    [SessionCorridor.v]'s extended state-machine alphabet).
+
+    Labels are stable numeric tags, chosen here to parallel the
+    sorted CBOR-wire tag ordering of [papers/op.tex §6]. *)
+
+(** Label tags for the six corridor messages, plus the two branch
+    selectors for Commit | Abort and their acks.  All labels are
+    distinct naturals. *)
+Definition lbl_TensorRequest : label := 0.
+Definition lbl_Locked        : label := 1.
+Definition lbl_VerdictI      : label := 2.
+Definition lbl_VerdictR      : label := 3.
+Definition lbl_Commit        : label := 4.
+Definition lbl_Abort         : label := 5.
+Definition lbl_CommitAck     : label := 6.
+Definition lbl_AbortAck      : label := 7.
+
+(** Placeholder abstract payload value used for every message at
+    this layer; real payloads (TensorValue, SignedVerdict, etc.)
+    are typed by the corridor typing judgment of [papers/op.tex
+    §5.9].  The projection / duality proof does not depend on
+    payload identity; we abstract over a single generic value. *)
+Parameter pload : payload.
+
+(** G_corridor_ack: the bilateral global type with the ack rung.
+    The branch at [lbl_Commit] continues with a
+    Responder->Initiator [lbl_CommitAck] message and ends; the
+    branch at [lbl_Abort] continues similarly with [lbl_AbortAck].
+*)
+Definition G_commit_ack_tail : bgtype :=
+  BG_Send R2I lbl_CommitAck pload BG_End.
+Definition G_abort_ack_tail  : bgtype :=
+  BG_Send R2I lbl_AbortAck pload BG_End.
+
+Definition G_corridor_ack : bgtype :=
+  BG_Send I2R lbl_TensorRequest pload (
+  BG_Send R2I lbl_Locked pload (
+  BG_Send I2R lbl_VerdictI pload (
+  BG_Send R2I lbl_VerdictR pload (
+  BG_Branch I2R
+    [ (lbl_Commit, pload, G_commit_ack_tail)
+    ; (lbl_Abort,  pload, G_abort_ack_tail)
+    ])))).
+
+(** The no-ack variant used in earlier drafts (and currently also
+    present in [papers/op.tex] in the stripped figure at lines
+    5009-5016 and 5032-5038).  Retained here as a reference point;
+    [G_corridor_no_ack] is the projection of G_corridor_ack
+    obtained by truncating both ack tails to [BG_End]. *)
+Definition G_corridor_no_ack : bgtype :=
+  BG_Send I2R lbl_TensorRequest pload (
+  BG_Send R2I lbl_Locked pload (
+  BG_Send I2R lbl_VerdictI pload (
+  BG_Send R2I lbl_VerdictR pload (
+  BG_Branch I2R
+    [ (lbl_Commit, pload, BG_End)
+    ; (lbl_Abort,  pload, BG_End)
+    ])))).
+
+(** Bilateral duality holds on [G_corridor_ack] as a direct
+    instance of [bilateral_duality]. *)
+Theorem G_corridor_ack_duality :
+  bproject G_corridor_ack Initiator =
+  dual (bproject G_corridor_ack Responder).
+Proof. apply bilateral_duality. Qed.
+
+Theorem G_corridor_ack_duality_sym :
+  bproject G_corridor_ack Responder =
+  dual (bproject G_corridor_ack Initiator).
+Proof. apply bilateral_duality_sym. Qed.
+
+(** Bilateral duality also holds on the no-ack variant. *)
+Theorem G_corridor_no_ack_duality :
+  bproject G_corridor_no_ack Initiator =
+  dual (bproject G_corridor_no_ack Responder).
+Proof. apply bilateral_duality. Qed.
+
+(** The alphabet-harmonization lemma: the two presentations (with
+    and without the ack rung) are equal on the four shared
+    non-ack-rung messages.  Equivalently, [G_corridor_no_ack] is
+    the ack-erased projection of [G_corridor_ack].  We express this
+    as a direct syntactic comparison on the prefix shared by both
+    global types. *)
+Lemma G_corridor_prefix_shared :
+  forall r,
+    (* prefix of the bilateral projection up to the Commit | Abort
+       branch is identical in both presentations *)
+    match bproject G_corridor_ack r, bproject G_corridor_no_ack r with
+    | L_Send l1 _ (L_Recv l2 _ (L_Send l3 _ (L_Recv l4 _ _))),
+      L_Send l1' _ (L_Recv l2' _ (L_Send l3' _ (L_Recv l4' _ _))) =>
+        l1 = l1' /\ l2 = l2' /\ l3 = l3' /\ l4 = l4'
+    | L_Recv l1 _ (L_Send l2 _ (L_Recv l3 _ (L_Send l4 _ _))),
+      L_Recv l1' _ (L_Send l2' _ (L_Recv l3' _ (L_Send l4' _ _))) =>
+        l1 = l1' /\ l2 = l2' /\ l3 = l3' /\ l4 = l4'
+    | _, _ => False
+    end.
+Proof.
+  intro r. destruct r; simpl; repeat split; reflexivity.
+Qed.
