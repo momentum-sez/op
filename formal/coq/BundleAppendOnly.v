@@ -172,4 +172,37 @@ Module BundleMonotonicity (B : AppendOnlyBundle).
       nth_error (B.bundle c) i = Some e.
   Proof. intros c i e H. exact H. Qed.
 
+  (** ** Further bundle-length properties (2026-04-20) *)
+
+  (** A bundle entry's position is bounded above by the bundle length. *)
+  Theorem bundle_entry_position_bounded :
+    forall c i e,
+      nth_error (B.bundle c) i = Some e ->
+      i < length (B.bundle c).
+  Proof.
+    intros c i e H. apply nth_error_Some.
+    rewrite H. intro Hcon. discriminate.
+  Qed.
+
+  (** Multi-step bundle monotonicity at the length level is a preorder:
+      reflexive and transitive. *)
+  Theorem bundle_length_preorder_refl :
+    forall c, length (B.bundle c) <= length (B.bundle c).
+  Proof. intros c. apply le_n. Qed.
+
+  Theorem bundle_length_preorder_trans :
+    forall c c' c'',
+      multi_step c c' -> multi_step c' c'' ->
+      length (B.bundle c) <= length (B.bundle c'').
+  Proof.
+    intros c c' c'' H1 H2.
+    apply Nat.le_trans with (m := length (B.bundle c')).
+    - apply bundle_length_monotone. exact H1.
+    - apply bundle_length_monotone. exact H2.
+  Qed.
+
+  (** multi_step_refl explicit alias. *)
+  Theorem multi_step_refl_alias : forall c, multi_step c c.
+  Proof. apply multi_step_refl. Qed.
+
 End BundleMonotonicity.
