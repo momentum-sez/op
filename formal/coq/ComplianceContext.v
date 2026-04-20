@@ -9,6 +9,7 @@
 Require Import Coq.Lists.List.
 Require Import Coq.Arith.PeanoNat.
 Require Import Coq.Bool.Bool.
+Require Import Coq.micromega.Lia.
 Import ListNotations.
 
 Set Implicit Arguments.
@@ -237,4 +238,92 @@ Proof.
   intros k1 k2 c [H1 | H2]; unfold context_meet.
   - apply meet_aux_preserves_sanctioned. exact H1.
   - apply meet_aux_absorbs_sanctioned. exact H2.
+Qed.
+
+(** -- Rank-monotonicity of cell_meet: meet never produces a
+       higher-rank verdict than either input.  This is the
+       "restrictiveness-monotone" property of the compliance
+       lattice: combining evidence can only lower the verdict
+       rank (toward the sanctioned bottom), never raise it. -- *)
+
+Lemma cell_meet_rank_le_left : forall v1 v2,
+  cell_rank (cell_meet v1 v2) <= cell_rank v1.
+Proof.
+  destruct v1, v2; compute; lia.
+Qed.
+
+Lemma cell_meet_rank_le_right : forall v1 v2,
+  cell_rank (cell_meet v1 v2) <= cell_rank v2.
+Proof.
+  destruct v1, v2; compute; lia.
+Qed.
+
+(** Corollary: cell_meet produces at most the minimum rank. *)
+Theorem cell_meet_rank_min :
+  forall v1 v2,
+    cell_rank (cell_meet v1 v2) <= Nat.min (cell_rank v1) (cell_rank v2).
+Proof.
+  intros v1 v2. apply Nat.min_glb.
+  - apply cell_meet_rank_le_left.
+  - apply cell_meet_rank_le_right.
+Qed.
+
+(** Idempotence at the rank level: meet with itself stays the
+    same rank. *)
+Lemma cell_meet_rank_self : forall v, cell_rank (cell_meet v v) = cell_rank v.
+Proof.
+  intros v. rewrite cell_meet_idempotent. reflexivity.
+Qed.
+
+(** Core update-lookup-rank lemma: after updating k at c'' with
+    v'', the rank at any coord c is bounded by the original
+    rank at c (if present). *)
+Lemma clookup_update_rank_monotone : forall k c v c'' v'' r,
+  clookup k c = Some v ->
+  clookup (update k c'' v'') c = Some r ->
+  cell_rank r <= cell_rank v.
+Proof.
+  intros k c v c'' v'' r H1 H2.
+  destruct (coord_eq_dec c c'') as [Heq|Hne].
+  - subst. rewrite (clookup_update_present _ _ _ H1) in H2.
+    inversion H2. apply cell_meet_rank_le_right.
+  - rewrite clookup_update_other in H2; [|congruence].
+    rewrite H1 in H2. inversion H2. lia.
+Qed.
+
+(** Compliance-context rank-monotonicity: after meeting two
+    contexts, every coordinate's rank is bounded above by the
+    rank it had in the left context (if present).  Qed-closed
+    by induction on the right context, using the update-rank
+    lemma above to establish the bound on every step of the
+    fold. *)
+Theorem context_meet_rank_monotone_left :
+  forall k2 k1 c v v',
+    clookup k1 c = Some v ->
+    clookup (context_meet k1 k2) c = Some v' ->
+    cell_rank v' <= cell_rank v.
+Proof.
+  intro k2. induction k2 as [|p k2 IH]; intros k1 c v v' H1 H2;
+    unfold context_meet in *; simpl in H2.
+  - rewrite H1 in H2. inversion H2. lia.
+  - destruct p as [c'' v''].
+    (** After the first update, the value at c is some r with
+        cell_rank r <= cell_rank v.  IH then gives the bound
+        for the tail. *)
+    destruct (clookup (update k1 c'' v'') c) as [r|] eqn:Hupd.
+    + assert (Hbound : cell_rank r <= cell_rank v).
+      { apply clookup_update_rank_monotone with
+          (k := k1) (c := c) (v := v) (c'' := c'') (v'' := v'') (r := r).
+        - exact H1.
+        - exact Hupd. }
+      assert (Hrec : cell_rank v' <= cell_rank r).
+      { apply IH with (k1 := update k1 c'' v'') (c := c) (v := r) (v' := v'); assumption. }
+      lia.
+    + (** impossible: update always produces a Some at c when
+          k1 has a Some at c *)
+      exfalso.
+      destruct (coord_eq_dec c c'') as [Heq|Hne].
+      * subst. rewrite (clookup_update_present _ _ _ H1) in Hupd. discriminate.
+      * rewrite clookup_update_other in Hupd; [|congruence].
+        rewrite H1 in Hupd. discriminate.
 Qed.
