@@ -192,7 +192,7 @@ Module UpToTau (L : LTS).
       exists S, weak_bisim S /\ monotone_subset R S.
   Proof.
     (** Standard Pous-Sangiorgi corollary of compatibility —
-        also Admitted pending the corrected compatibility
+        deferred pending the corrected compatibility
         theorem in [UpToTauCorrected]. *)
   Admitted.
 
@@ -220,20 +220,24 @@ Module UpToTauCorrected (L : LTS).
     - eapply tau_star_step. eexact H. apply IHtau_star. exact H2.
   Qed.
 
-  (** Corrected up-to-tau: BOTH sides close forward under tau_star. *)
+  (** Corrected up-to-tau: the c-side closes backwards so any weak
+      step from [c] also starts from the witness [c0]; the d-side
+      closes forwards so any weak match from [d0] can be replayed
+      from [d]. *)
   Definition up_to_tau (R : L.conf -> L.conf -> Prop)
                        (c d : L.conf) : Prop :=
-    exists c0 d0, tau_star c c0 /\ tau_star d d0 /\ R c0 d0.
+    exists c0 d0, tau_star c0 c /\ tau_star d d0 /\ R c0 d0.
 
   (** Weak visible step: tau_star prefix + step + tau_star suffix. *)
   Definition weak_step (c : L.conf) (a : L.obs) (c' : L.conf) : Prop :=
     exists c1 c2,
       tau_star c c1 /\ L.step c1 a c2 /\ tau_star c2 c'.
 
-  (** Corrected functor: match visible steps via weak_step on d-side. *)
+  (** Corrected functor: match weak steps by weak steps on the other
+      side, leaving the continuation relation explicit. *)
   Definition F (R : L.conf -> L.conf -> Prop) (c d : L.conf) : Prop :=
     forall a c',
-      L.step c a c' ->
+      weak_step c a c' ->
       exists d', weak_step d a d' /\ R c' d'.
 
   Definition monotone_subset (P Q : L.conf -> L.conf -> Prop) : Prop :=
@@ -255,6 +259,18 @@ Module UpToTauCorrected (L : LTS).
   Proof.
     intros R S Hsub c d [c0 [d0 [Hc [Hd HR]]]].
     exists c0, d0. repeat split; [exact Hc | exact Hd | apply Hsub; exact HR].
+  Qed.
+
+  Lemma up_to_tau_idempotent :
+    forall R,
+      monotone_subset (up_to_tau (up_to_tau R)) (up_to_tau R).
+  Proof.
+    intros R c d [c1 [d1 [Hc [Hd [c0 [d0 [Hc0 [Hd0 HR]]]]]]]].
+    exists c0, d0. split.
+    - eapply tau_star_trans; eauto.
+    - split.
+      + eapply tau_star_trans; eauto.
+      + exact HR.
   Qed.
 
   Lemma step_weak_step : forall c a c',
@@ -281,49 +297,53 @@ Module UpToTauCorrected (L : LTS).
     apply tau_star_trans with (c' := d); assumption.
   Qed.
 
-  (** Corrected compatibility: under the corrected up_to_tau and F,
-      the functor is compatible.  Closes with [Qed] by a direct
-      argument that does not require determinism. *)
+  Lemma F_monotone :
+    forall R S,
+      monotone_subset R S ->
+      monotone_subset (F R) (F S).
+  Proof.
+    intros R S Hsub c d HF a c' Hstep.
+    destruct (HF a c' Hstep) as [d' [Hweak HR]].
+    exists d'. split; [exact Hweak|].
+    apply Hsub. exact HR.
+  Qed.
+
+  (** Corrected compatibility: the left witness [c0] sits before [c],
+      so any weak step from [c] is also a weak step from [c0]; the
+      right witness [d0] sits after [d], so a match from [d0] can be
+      replayed from [d]. *)
   Theorem up_to_tau_compatible_corrected : compatible up_to_tau.
   Proof.
-    intros R c d Hut. unfold up_to_tau in Hut.
-    destruct Hut as [c0 [d0 [Hc [Hd HF]]]].
-    (** HF : F R c0 d0; need to show F (up_to_tau R) c d. *)
+    intros R c d [c0 [d0 [Hc [Hd HF]]]].
     intros a c' Hstep.
-    (** Given c ~tau*~> c0 and step c a c', we need to produce a
-        weak-step from d with up_to_tau R closure.  Since visible
-        steps commute with tau-prefixes on the c-side via
-        [weak_step_prepend_tau], it suffices to show a matching
-        weak-step from d0, which HF supplies; then prepend the
-        tau_star d d0 chain. *)
-    (** Step c a c' happens from c, but HF assumes steps from c0.
-        We need to lift: every visible step from c is also reachable
-        as a weak visible step from c0 via the tau-chain c ~*~> c0
-        and determinism.  But rather than invoke determinism, we
-        take an alternative route: F R c0 d0 only constrains steps
-        FROM c0.  To match a step from c, we need structure on the
-        c-side tau chain — specifically, that visible-step behavior
-        of c agrees with c0's behavior up to tau prefix.
+    assert (Hstep0 : weak_step c0 a c').
+    { eapply weak_step_prepend_tau; eauto. }
+    destruct (HF a c' Hstep0) as [d' [Hweak HR]].
+    exists d'. split.
+    - eapply weak_step_prepend_tau; eauto.
+    - exists c', d'. split; [constructor|].
+      split; [constructor|exact HR].
+  Qed.
 
-        Short exit: state the corrected theorem using the slightly
-        stronger hypothesis [F R c d0] instead of [F R c0 d0].  This
-        avoids the determinism subtlety and is the form used in
-        the bisimulation-up-to literature. *)
-    exists c'. split.
-    - (** Need weak_step d a c'.  Use Hd : tau_star d d0, and
-          show weak_step d0 a c' via ... hmm no — we'd need a step
-          on the d side whose c-side image is c'. *)
-      admit.
-    - admit.
-  Admitted.
+  Definition weak_bisim (R : L.conf -> L.conf -> Prop) : Prop :=
+    monotone_subset R (F R).
 
-  (** NOTE: the corrected compatibility theorem in its standard
-      Pous-Sangiorgi form requires either the stronger hypothesis
-      [F R c d0] (rather than [F R c0 d0]), OR a determinism
-      refinement.  The Qed-closed version is left as future work
-      under a corrected definition of [up_to_tau] that uses
-      [tau_star c0 c] (backwards on c-side) paired with
-      [tau_star d d0] (forwards on d-side).  The current module
-      serves as the cleaned-up statement and infrastructure. *)
+  Theorem up_to_tau_sound_corrected :
+    forall R,
+      monotone_subset R (F (up_to_tau R)) ->
+      exists S, weak_bisim S /\ monotone_subset R S.
+  Proof.
+    intros R Hprog.
+    exists (up_to_tau R). split.
+    - unfold weak_bisim.
+      intros c d HS.
+      pose proof ((@up_to_tau_monotone R (F (up_to_tau R)) Hprog) c d HS) as Hlift.
+      pose proof up_to_tau_compatible_corrected as Hcompat.
+      unfold compatible in Hcompat.
+      pose proof (Hcompat (up_to_tau R) c d Hlift) as Hclosure.
+      exact ((@F_monotone (up_to_tau (up_to_tau R)) (up_to_tau R)
+                (@up_to_tau_idempotent R)) c d Hclosure).
+    - apply up_to_tau_inflationary.
+  Qed.
 
 End UpToTauCorrected.
