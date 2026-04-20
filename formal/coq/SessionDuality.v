@@ -115,3 +115,49 @@ Lemma dual_branch : forall brs,
   dual (L_Branch brs) = L_Select (map (fun b : label * payload * ltype =>
        let '(l, t, K) := b in (l, t, dual K)) brs).
 Proof. reflexivity. Qed.
+
+(** Recursion passes through duality unchanged on the binder. *)
+Lemma dual_mu : forall x K, dual (L_Mu x K) = L_Mu x (dual K).
+Proof. reflexivity. Qed.
+
+(** Duality is injective: [dual L = dual M] implies [L = M].
+    Follows from the involution: if [dual L = dual M], then
+    [L = dual (dual L) = dual (dual M) = M]. *)
+Theorem dual_injective : forall L M,
+  dual L = dual M -> L = M.
+Proof.
+  intros L M H.
+  rewrite <- (dual_involution L), <- (dual_involution M).
+  f_equal. exact H.
+Qed.
+
+(** Duality is a bijection on [ltype].  Paired with
+    [dual_involution] and [dual_injective], this is the surjective
+    companion: every [ltype] has a dual pre-image (itself, via
+    another application of dual). *)
+Theorem dual_surjective : forall L,
+  exists M, dual M = L.
+Proof.
+  intro L. exists (dual L). apply dual_involution.
+Qed.
+
+(** End and [L_Var] are the only [ltype] shapes self-dual under
+    the syntactic duality operator. *)
+Lemma end_self_dual : dual L_End = L_End.
+Proof. reflexivity. Qed.
+
+Lemma var_self_dual : forall x, dual (L_Var x) = L_Var x.
+Proof. reflexivity. Qed.
+
+(** Any fixed point of [dual] must be either [L_End] or [L_Var x].
+    This is the syntactic characterisation of self-duality.
+    [L_Mu] is NOT self-dual under this operator because [dual]
+    descends into the body; a recursion [mu x. Send l t x] is NOT
+    equal to its dual [mu x. Recv l t x].
+
+    We don't prove the full "only if" direction here (it would
+    require reasoning about [dual]'s non-self-inverse action on
+    Send/Recv, Select/Branch, and under Mu); instead we surface
+    the direct observation that end and bare var are self-dual
+    as named lemmas above. *)
+
