@@ -327,3 +327,62 @@ Proof.
       * rewrite clookup_update_other in Hupd; [|congruence].
         rewrite H1 in Hupd. discriminate.
 Qed.
+
+(** ** Rank characterisation of the verdict chain *)
+
+(** [CC_Sanctioned] is rank 0 — the minimum of the six-valued
+    carrier. *)
+Lemma cell_rank_sanctioned_is_min : cell_rank CC_Sanctioned = 0.
+Proof. reflexivity. Qed.
+
+(** [CC_Compliant] is rank 5 — the maximum of the six-valued
+    carrier. *)
+Lemma cell_rank_compliant_is_max : cell_rank CC_Compliant = 5.
+Proof. reflexivity. Qed.
+
+(** Every [cell_verdict]'s rank is bounded below by zero (the
+    [CC_Sanctioned] rank).  Trivial but serves as an explicit
+    citation. *)
+Theorem cell_rank_sanctioned_is_global_min :
+  forall v, cell_rank CC_Sanctioned <= cell_rank v.
+Proof. destruct v; compute; lia. Qed.
+
+(** Every [cell_verdict]'s rank is bounded above by five (the
+    [CC_Compliant] rank). *)
+Theorem cell_rank_compliant_is_global_max :
+  forall v, cell_rank v <= cell_rank CC_Compliant.
+Proof. destruct v; compute; lia. Qed.
+
+(** [cell_meet] with [CC_Compliant] is the identity (the top of the
+    carrier acts as the right unit for meet). *)
+Lemma cell_meet_compliant_right :
+  forall v, cell_meet v CC_Compliant = v.
+Proof. destruct v; reflexivity. Qed.
+
+Lemma cell_meet_compliant_left :
+  forall v, cell_meet CC_Compliant v = v.
+Proof. destruct v; reflexivity. Qed.
+
+(** The cell-meet is a monoid operation on the non-Sanctioned
+    fragment with [CC_Compliant] as the identity and
+    [CC_Sanctioned] as the absorbing element.  The two sanctions-
+    absorption and two compliant-identity lemmas above, together with
+    [cell_meet_idempotent], [cell_meet_comm], and [cell_meet_assoc],
+    package the structure.  Qed-bundled below. *)
+Theorem cell_verdict_meet_commutative_monoid_with_absorbing_bottom :
+  (forall v, cell_meet v v = v) /\
+  (forall a b, cell_meet a b = cell_meet b a) /\
+  (forall a b c, cell_meet (cell_meet a b) c = cell_meet a (cell_meet b c)) /\
+  (forall v, cell_meet v CC_Compliant = v) /\
+  (forall v, cell_meet CC_Compliant v = v) /\
+  (forall v, cell_meet v CC_Sanctioned = CC_Sanctioned) /\
+  (forall v, cell_meet CC_Sanctioned v = CC_Sanctioned).
+Proof.
+  split; [apply cell_meet_idempotent|].
+  split; [apply cell_meet_comm|].
+  split; [apply cell_meet_assoc|].
+  split; [apply cell_meet_compliant_right|].
+  split; [apply cell_meet_compliant_left|].
+  split; [apply cell_meet_sanctioned_right|].
+  apply cell_meet_sanctioned_left.
+Qed.
