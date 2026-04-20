@@ -236,27 +236,29 @@ scalar-constant branch bodies:
 The file type-checks under `coqc` (Rocq Prover 9.1.1) with no errors
 and no warnings.
 
-## Proof obligations
+## Proof status
 
-Eight of nine compilation cases are mechanized. The §6.2 compilation
-function comprises eight closed cases: the scalar shape of the
-constant case, the sanctions-dominance case, the variable case, the
-record shape of the constant case, the list shape of the constant
-case, the variant shape of the constant case, the match case, and
-the defeasible case. All eight close with `Qed.`. One obligation
-remains, registered in the `Obligations` section at the foot of
-`CompilationSoundness.v`, with a proof-structure comment:
+9 of 9 cases mechanized. Full §6.3 verdict-preservation complete.
+Zero axioms.
 
-| Obligation | Shape | Strategy |
-|---|---|---|
-| HoleFill (§6.3) | `HoleFill hole_id filler witness` | Coinduction on a bisimulation relation pairing each Lex state with the Op state reached by unwinding one `tau` attestation-append step. |
+The §6.2 / §6.3 compilation function now closes in full: the scalar
+shape of the constant case, the sanctions-dominance case, the
+variable case, the record shape of the constant case, the list shape
+of the constant case, the variant shape of the constant case, the
+match case, the defeasible case, and the hole-fill case all close
+with `Qed.`.
 
-The remaining obligation is an open theorem whose signature matches
-the target result. The surrounding parameters (`ExtLexTerm`,
-`ExtOpExpr`, `ExtCompile`, `ExtLexVerdict`, `ExtOpVerdict`, and the
-syntactic constructor `ELT_HoleFill`) stand in for the extended
-inductive definitions that a follow-on file introduces by mirroring
-the Rust AST in `crates/op-lex-compiler/src/ast.rs`.
+The hole-fill case mirrors `case_fill.rs` concretely:
+
+1. `FillWitness`, `FillLexTerm`, and `FillOpExpr` model the filled
+   hole and the `Seq(attestation.append, value)` Op lowering.
+2. `fill_op_weak_verdict` absorbs the finite `tau` prefix introduced
+   by the attestation append.
+3. `weak_sim`, `fill_post_stable`, and `fill_bisim` establish the
+   weak simulation up to `tau`.
+4. `verdict_preservation_fill` closes the biconditional with `Qed.`,
+   and `Print Assumptions verdict_preservation_fill.` reports the
+   theorem closed under the global context.
 
 ## Running the typechecker
 
@@ -265,7 +267,7 @@ cd formal/coq
 coqc CompilationSoundness.v
 ```
 
-Exit code zero and no diagnostic output indicates the eight
+Exit code zero and no diagnostic output indicates the nine
 mechanized cases are machine-verified by Rocq 9.1.1.
 
 ## Relation to the Rust reference
@@ -279,12 +281,9 @@ record / list / variant shapes),
 (`compile_var`), `crates/op-lex-compiler/src/case_match.rs`
 (`compile_match`, fail-closed sentinel `fail_closed_expr`), and
 `crates/op-lex-compiler/src/case_defeasible.rs`
-(`compile_defeasible`). Each Coq definition is the mathematical
+(`compile_defeasible`), and `crates/op-lex-compiler/src/case_fill.rs`
+(`compile_fill`). Each Coq definition is the mathematical
 companion of the corresponding Rust function; every scalar base
 constructor handled by the Rust `lift_value` is handled by the Coq
 `lift_value`; the sanctions-dominance, variable, record, list,
-variant, match, and defeasible compilation shapes agree. Extending
-the Coq mechanization to the remaining case is a matter of
-mirroring `case_fill.rs` into the corresponding inductive relations
-and discharging the obligation registered in the `Obligations`
-section.
+variant, match, defeasible, and hole-fill compilation shapes agree.
