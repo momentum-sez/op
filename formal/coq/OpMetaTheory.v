@@ -144,6 +144,32 @@ Definition compliance_le (k1 k2 : core_compliance_ctx) : Prop :=
   | KClean, KBlocked => False
   end.
 
+(** ** compliance_le is a preorder (2026-04-20) *)
+
+Lemma compliance_le_refl : forall k, compliance_le k k.
+Proof. destruct k; simpl; trivial. Qed.
+
+Lemma compliance_le_trans :
+  forall k1 k2 k3,
+    compliance_le k1 k2 ->
+    compliance_le k2 k3 ->
+    compliance_le k1 k3.
+Proof.
+  destruct k1, k2, k3; simpl; intros H1 H2; try trivial; contradiction.
+Qed.
+
+(** KBlocked is the bottom of the compliance order. *)
+Lemma compliance_le_blocked_bot : forall k, compliance_le KBlocked k.
+Proof. destruct k; simpl; trivial. Qed.
+
+(** KClean sits strictly above KBlocked. *)
+Lemma compliance_le_blocked_clean : compliance_le KBlocked KClean.
+Proof. simpl. trivial. Qed.
+
+(** KClean is NOT below KBlocked (the order is anti-symmetric here). *)
+Lemma compliance_not_le_clean_blocked : ~ compliance_le KClean KBlocked.
+Proof. simpl. intro H. exact H. Qed.
+
 Inductive core_ty : Type :=
   | CT_Unit
   | CT_Bool
