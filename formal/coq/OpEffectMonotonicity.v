@@ -382,3 +382,49 @@ Lemma runion_assoc :
 Proof.
   intros r1 r2 r3. unfold runion. rewrite <- app_assoc. reflexivity.
 Qed.
+
+(** ** Further effect-row structural properties (2026-04-20) *)
+
+(** Decidable equality on effect. *)
+Lemma effect_eq_dec' :
+  forall e1 e2 : effect, {e1 = e2} + {e1 <> e2}.
+Proof. exact effect_eq_dec. Qed.
+
+(** List-of-effect (row) equality is decidable. *)
+Lemma row_eq_dec :
+  forall r1 r2 : row, {r1 = r2} + {r1 <> r2}.
+Proof. apply list_eq_dec. apply effect_eq_dec. Qed.
+
+(** The empty row is a left- and right-identity for runion. *)
+Lemma runion_identity :
+  forall r, runion [] r = r /\ runion r [] = r.
+Proof.
+  intros r. split.
+  - apply runion_nil_left.
+  - apply runion_nil_right.
+Qed.
+
+(** Effect constructors are pairwise distinct. *)
+Lemma effect_sovereignwrite_neq_identity :
+  E_SovereignWrite <> E_IdentityMutation.
+Proof. discriminate. Qed.
+
+Lemma effect_identity_neq_fiscal :
+  E_IdentityMutation <> E_FiscalTransfer.
+Proof. discriminate. Qed.
+
+Lemma effect_sanctions_neq_governance :
+  E_SanctionsCheck <> E_GovernanceRequest.
+Proof. discriminate. Qed.
+
+Lemma effect_governance_neq_document :
+  E_GovernanceRequest <> E_DocumentGeneration.
+Proof. discriminate. Qed.
+
+Lemma effect_externalread_neq_proofemit :
+  E_ExternalRead <> E_ProofEmit.
+Proof. discriminate. Qed.
+
+Lemma effect_proofemit_neq_await :
+  E_ProofEmit <> E_Await.
+Proof. discriminate. Qed.
