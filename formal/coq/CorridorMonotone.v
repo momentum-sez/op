@@ -232,4 +232,40 @@ Module CorridorMonotone (R : RuleExtension).
     - eapply extends_with_implies_sub. exact Hext.
   Qed.
 
+  (** ** Further typed-rule-step monotonicity (2026-04-20) *)
+
+  (** A multi-step sequence of rule applications preserves kappa_sub. *)
+  Inductive rule_steps : kappa R.V -> kappa R.V -> Prop :=
+    | rule_steps_refl : forall k, rule_steps k k
+    | rule_steps_cons : forall k k' k'',
+        R.rule_step k k' -> rule_steps k' k'' -> rule_steps k k''.
+
+  Theorem kappa_multi_monotone :
+    forall k k', rule_steps k k' -> kappa_sub k k'.
+  Proof.
+    intros k k' H. induction H as [|k0 k1 k2 Hstep Hrest IH].
+    - apply kappa_sub_refl.
+    - apply kappa_sub_trans with (k2 := k1).
+      + apply kappa_monotone. exact Hstep.
+      + exact IH.
+  Qed.
+
+  (** rule_steps is transitive. *)
+  Theorem rule_steps_trans :
+    forall k k' k'',
+      rule_steps k k' -> rule_steps k' k'' -> rule_steps k k''.
+  Proof.
+    intros k k' k'' H1. revert k''.
+    induction H1 as [|k0 k1 k2 Hstep Hrest IH]; intros k3 H2.
+    - exact H2.
+    - eapply rule_steps_cons; [exact Hstep | apply IH; exact H2].
+  Qed.
+
+  (** A single rule_step embeds as a length-1 rule_steps. *)
+  Theorem rule_step_to_steps :
+    forall k k', R.rule_step k k' -> rule_steps k k'.
+  Proof.
+    intros k k' H. eapply rule_steps_cons; [exact H | apply rule_steps_refl].
+  Qed.
+
 End CorridorMonotone.
