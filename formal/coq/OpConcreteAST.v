@@ -214,3 +214,37 @@ Theorem step_gas_exact_decrement :
 Proof.
   intros e g c' Hstep. inversion Hstep; subst. reflexivity.
 Qed.
+
+(** ** Further config + step properties (2026-04-20) *)
+
+(** cfg_expr of mk_config is the expr argument. *)
+Lemma cfg_expr_mk : forall e g, cfg_expr (mk_config e g) = e.
+Proof. intros e g. reflexivity. Qed.
+
+(** cfg_gas of mk_config is the gas argument. *)
+Lemma cfg_gas_mk : forall e g, cfg_gas (mk_config e g) = g.
+Proof. intros e g. reflexivity. Qed.
+
+(** terminal_expr is decidable (a simpler alternative to terminal_expr_dec). *)
+Theorem terminal_or_not :
+  forall e, terminal_expr e \/ ~ terminal_expr e.
+Proof.
+  intros e. destruct (terminal_expr_dec e); [left | right]; assumption.
+Qed.
+
+(** E_Halted, E_SanctionsBlocked, E_OutOfGas are all terminal. *)
+Theorem named_terminals :
+  terminal_expr E_Halted /\
+  terminal_expr E_SanctionsBlocked /\
+  terminal_expr E_OutOfGas.
+Proof. repeat split; exact I. Qed.
+
+(** E_Const, E_Var, E_Let, E_App, E_Lam, E_Sanctions are non-terminal. *)
+Theorem named_non_terminals :
+  (forall n, ~ terminal_expr (E_Const n)) /\
+  (forall n, ~ terminal_expr (E_Var n)) /\
+  (forall n e1 e2, ~ terminal_expr (E_Let n e1 e2)) /\
+  (forall e1 e2, ~ terminal_expr (E_App e1 e2)) /\
+  (forall n e, ~ terminal_expr (E_Lam n e)) /\
+  (forall e, ~ terminal_expr (E_Sanctions e)).
+Proof. repeat split; intros; intro H; exact H. Qed.
