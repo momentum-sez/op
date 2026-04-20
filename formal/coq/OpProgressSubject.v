@@ -496,3 +496,76 @@ Proof.
       eapply subst_preserves; eauto.
       eapply closed_typed_empty; eauto.
 Qed.
+
+(** * Further properties (2026-04-20) *)
+
+(** Values do not step.  Corollary of progress + canonical forms. *)
+Theorem values_do_not_step :
+  forall v e',
+    value v ->
+    ~ step v e'.
+Proof.
+  intros v e' Hval Hstep.
+  inversion Hval; subst; inversion Hstep.
+Qed.
+
+(** Canonical forms for the Nat type: values of type Nat are constants. *)
+Theorem canonical_forms_nat :
+  forall v,
+    value v ->
+    has_type [] v T_Nat ->
+    exists n, v = E_Const n.
+Proof.
+  intros v Hval Htyp.
+  inversion Hval; subst.
+  - exists n. reflexivity.
+  - inversion Htyp.
+Qed.
+
+(** Multi-step preservation: multi-step reduction preserves typing. *)
+Inductive multi_step : expr -> expr -> Prop :=
+  | MStep_refl : forall e, multi_step e e
+  | MStep_cons : forall e e' e'',
+      step e e' -> multi_step e' e'' -> multi_step e e''.
+
+Theorem op_multi_preservation :
+  forall G e T e',
+    has_type G e T ->
+    multi_step e e' ->
+    has_type G e' T.
+Proof.
+  intros G e T e' Htyp Hms. generalize dependent T. generalize dependent G.
+  induction Hms; intros G T Htyp.
+  - exact Htyp.
+  - apply IHHms. eapply op_subject_reduction; eauto.
+Qed.
+
+(** Multi-step is reflexive and transitive. *)
+Theorem multi_step_refl : forall e, multi_step e e.
+Proof. exact MStep_refl. Qed.
+
+Theorem multi_step_trans :
+  forall e1 e2 e3,
+    multi_step e1 e2 ->
+    multi_step e2 e3 ->
+    multi_step e1 e3.
+Proof.
+  intros e1 e2 e3 H1. induction H1 as [e|e a b Hs Ht IH]; intros H2.
+  - exact H2.
+  - eapply MStep_cons; [exact Hs | apply IH; exact H2].
+Qed.
+
+(** Soundness of the type system: well-typed closed terms don't get
+    stuck.  A well-typed term either terminates at a value or can
+    take another step. *)
+Theorem op_type_soundness :
+  forall e T e',
+    has_type [] e T ->
+    multi_step e e' ->
+    value e' \/ exists e'', step e' e''.
+Proof.
+  intros e T e' Htyp Hms.
+  assert (Htyp' : has_type [] e' T)
+    by (eapply op_multi_preservation; eauto).
+  apply (op_progress e' T Htyp').
+Qed.
