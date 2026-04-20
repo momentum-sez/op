@@ -794,3 +794,38 @@ Qed.
 (** The empty kappa is reachable from itself (trivial). *)
 Theorem kappa_empty_reachable_from_self : steps kappa_empty kappa_empty.
 Proof. apply StepsRefl. Qed.
+
+(** ** Further step-relation structural properties (2026-04-20) *)
+
+(** A step of op_lock extends kappa non-trivially. *)
+Theorem step_lock_is_step :
+  forall s i d k,
+    op_lock_pre s i k ->
+    step k (op_lock s i d k).
+Proof. intros s i d k Hpre. apply StepLock. exact Hpre. Qed.
+
+(** A step of op_sign extends kappa. *)
+Theorem step_sign_is_step :
+  forall s i d k,
+    op_sign_pre s i k ->
+    step k (op_sign s i d k).
+Proof. intros s i d k Hpre. apply StepSign. exact Hpre. Qed.
+
+(** A step of op_verify extends kappa. *)
+Theorem step_verify_is_step :
+  forall s i k,
+    op_verify_pre s i k ->
+    step k (op_verify s i k).
+Proof. intros s i k Hpre. apply StepVerify. exact Hpre. Qed.
+
+(** A step of op_blame always applies. *)
+Theorem step_blame_is_step :
+  forall owner z i k,
+    step k (op_blame owner z i k).
+Proof. intros. apply StepBlame. Qed.
+
+(** A step of op_timeout always applies. *)
+Theorem step_timeout_is_step :
+  forall s i k,
+    step k (op_timeout s i k).
+Proof. intros. apply StepTimeout. Qed.
