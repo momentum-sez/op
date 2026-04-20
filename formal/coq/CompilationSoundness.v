@@ -1731,6 +1731,35 @@ Proof.
   - exists OE_Unit. constructor.
 Qed.
 
+(** ** Further sanity examples (2026-04-20) *)
+
+Example const_bool_false_round_trip :
+  lex_verdict (LT_Const (LV_Bool false)) (LV_Bool false) /\
+  op_verdict (compile (LT_Const (LV_Bool false))) (LV_Bool false).
+Proof.
+  split.
+  - exists (LT_Const (LV_Bool false)). constructor.
+  - exists (OE_Bool false). constructor.
+Qed.
+
+Example const_int_zero_round_trip :
+  lex_verdict (LT_Const (LV_Int 0)) (LV_Int 0) /\
+  op_verdict (compile (LT_Const (LV_Int 0))) (LV_Int 0).
+Proof.
+  split.
+  - exists (LT_Const (LV_Int 0)). constructor.
+  - exists (OE_Int 0). constructor.
+Qed.
+
+Example const_str_empty_round_trip :
+  lex_verdict (LT_Const (LV_Str "")) (LV_Str "") /\
+  op_verdict (compile (LT_Const (LV_Str ""))) (LV_Str "").
+Proof.
+  split.
+  - exists (LT_Const (LV_Str "")). constructor.
+  - exists (OE_Str ""). constructor.
+Qed.
+
 (* ------------------------------------------------------------------ *)
 (**  End of file.                                                    *)
 (* ------------------------------------------------------------------ *)
