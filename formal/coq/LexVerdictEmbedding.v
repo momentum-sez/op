@@ -132,6 +132,48 @@ Proof.
   destruct v1, v2; compute; reflexivity.
 Qed.
 
+(** ** Bounds preservation *)
+
+(** The Lex chain's top (LV_Compliant) maps to the Op chain's top
+    (CC_Compliant) under the embedding.  This is the maximal value in
+    both the Lex five-chain and the Op six-valued carrier when
+    restricted to the non-Sanctioned fragment. *)
+Theorem lex_to_op_preserves_top :
+  lex_to_op LV_Compliant = CC_Compliant.
+Proof. reflexivity. Qed.
+
+(** The Lex chain's bottom (LV_NonCompliant) maps to the second-
+    from-bottom of Op's carrier, NOT to CC_Sanctioned (which is Op's
+    absorbing bottom but lies strictly below the image of
+    [lex_to_op]).  This is the statement that the Lex five-chain
+    embeds into the top-five positions of the Op six-valued carrier,
+    with [CC_Sanctioned] reserved for sanctions-blocked paths that
+    do not originate in Lex evaluation. *)
+Theorem lex_to_op_bottom_above_sanctioned :
+  cell_rank CC_Sanctioned < cell_rank (lex_to_op LV_NonCompliant).
+Proof. compute. lia. Qed.
+
+(** [lex_to_op] is rank-preserving up to the uniform shift, so every
+    Lex chain element's image has strictly greater rank than
+    [CC_Sanctioned]. *)
+Theorem lex_to_op_image_above_sanctioned :
+  forall v, cell_rank CC_Sanctioned < cell_rank (lex_to_op v).
+Proof. destruct v; compute; lia. Qed.
+
+(** Meet with [CC_Sanctioned] absorbs the embedded image to
+    [CC_Sanctioned] itself, which is OUTSIDE the image of
+    [lex_to_op].  This is the operational statement that sanctions-
+    blocking leaves the Lex sub-lattice entirely. *)
+Theorem lex_image_absorbed_by_sanctioned :
+  forall v,
+    cell_meet (lex_to_op v) CC_Sanctioned = CC_Sanctioned.
+Proof. intro v. apply cell_meet_sanctioned_right. Qed.
+
+Theorem sanctioned_absorbs_lex_image :
+  forall v,
+    cell_meet CC_Sanctioned (lex_to_op v) = CC_Sanctioned.
+Proof. intro v. apply cell_meet_sanctioned_left. Qed.
+
 (** ** Structural bijection on the non-Sanctioned fragment *)
 
 (** Every non-Sanctioned [cell_verdict] has a unique preimage under
