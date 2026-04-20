@@ -569,3 +569,36 @@ Proof.
     by (eapply op_multi_preservation; eauto).
   apply (op_progress e' T Htyp').
 Qed.
+
+(** ** Further value / type properties (2026-04-20) *)
+
+(** Values are preserved by multi_step where the target is also a value
+    (trivial: each value has the form E_Const or E_Lam, and steps from
+    these are impossible). *)
+Theorem value_multi_step_refl :
+  forall v, value v -> multi_step v v.
+Proof. intros v _. apply MStep_refl. Qed.
+
+(** Multi-step from a value: v multi-steps only to itself. *)
+Theorem value_multi_step_fixed :
+  forall v v',
+    value v ->
+    multi_step v v' ->
+    v = v'.
+Proof.
+  intros v v' Hval Hms. induction Hms as [|e e' e'' Hstep _ IH].
+  - reflexivity.
+  - exfalso. apply (values_do_not_step e e' Hval Hstep).
+Qed.
+
+(** E_Const is a value constructor (named alias). *)
+Lemma const_is_value : forall n, value (E_Const n).
+Proof. intros n. apply V_Const. Qed.
+
+(** E_Lam is a value constructor (named alias). *)
+Lemma lam_is_value : forall x T e, value (E_Lam x T e).
+Proof. intros x T e. apply V_Lam. Qed.
+
+(** Zero-step reflexivity for multi_step. *)
+Lemma multi_step_zero : forall e, multi_step e e.
+Proof. apply multi_step_refl. Qed.
