@@ -403,9 +403,33 @@ Theorem test_reject_6 :
   verify test_reject_6_bytes = Reject InvalidEntityByte.
 Proof. reflexivity. Qed.
 
+(** ** Additional reject tests (2026-04-20) *)
+
+(** Reject 7: invalid operation byte (out-of-range). *)
+Definition test_reject_7_bytes : list byte :=
+  [1; 60; 0; 300; 0].
+
+Theorem test_reject_7 :
+  verify test_reject_7_bytes = Reject InvalidOpByte.
+Proof. reflexivity. Qed.
+
+(** Reject 8: empty byte string. *)
+Definition test_reject_8_bytes : list byte := [].
+
+Theorem test_reject_8 :
+  verify test_reject_8_bytes = Reject WrongLength.
+Proof. reflexivity. Qed.
+
+(** Reject 9: single-byte message (too short). *)
+Definition test_reject_9_bytes : list byte := [1].
+
+Theorem test_reject_9 :
+  verify test_reject_9_bytes = Reject WrongLength.
+Proof. reflexivity. Qed.
+
 (** ** Summary of the conformance suite *)
 
-(** 6 accept tests + 6 reject tests = 12 conformance tests.  All
+(** 6 accept tests + 9 reject tests = 15 conformance tests.  All
     Qed-closed.  An external verifier implementer passes the
     suite iff every [test_accept_*] and [test_reject_*] theorem
     has the same observable result (Accept with the same receipt,
@@ -418,8 +442,8 @@ Theorem conformance_suite_accept_count :
 Proof. reflexivity. Qed.
 
 Theorem conformance_suite_reject_count :
-  (* Exactly six reject tests are part of the suite. *)
-  6 = 6.
+  (* Exactly nine reject tests are part of the suite. *)
+  9 = 9.
 Proof. reflexivity. Qed.
 
 (** ** Injectivity of [encode] at the byte level *)
