@@ -7,8 +7,8 @@
     abstractly; concrete Lex and Op transition systems are imported
     from Lex.Syntax and CompilationSoundness respectively. *)
 
-Require Import Coq.Relations.Relation_Definitions.
-Require Import Coq.Lists.List.
+From Stdlib Require Import Relations.Relation_Definitions.
+From Stdlib Require Import Lists.List.
 
 Set Implicit Arguments.
 
@@ -48,7 +48,7 @@ Module WeakTransition (L : LTS).
   Qed.
 
   (** A single step promotes to a weak step (if the action is not
-      tau, or even if it is — the weak_step wrapper handles both). *)
+      tau, or even if it is - the weak_step wrapper handles both). *)
   Lemma step_weak_step : forall c a c',
     L.step c a c' -> weak_step c a c'.
   Proof.
@@ -151,6 +151,38 @@ Module HeteroBisim
   Proof.
     intros _.
     exact I.
+  Qed.
+
+  Theorem adequacy_b_closed :
+    hetero_weak_bisim adequacy_b_relation ->
+    forall c, hbisim c (compile c).
+  Proof.
+    intro H.
+    cofix IH.
+    intro c.
+    refine (@hbisim_intro c (compile c) _ _).
+    - intros a c' Hstep.
+      destruct (H c (compile c) eq_refl) as [Hlex _].
+      destruct (Hlex a c' Hstep) as [d' [Hw Hrel]].
+      exists d'. split.
+      + exact Hw.
+      + unfold adequacy_b_relation in Hrel.
+        refine (
+          match eq_sym Hrel in _ = d return hbisim c' d with
+          | eq_refl => IH c'
+          end).
+    - intros b d' Hstep Hnot.
+      destruct (H c (compile c) eq_refl) as [_ Hop].
+      destruct (Hop b d' Hstep Hnot) as [a [c' [Hpi [Hw Hrel]]]].
+      exists a, c'. split.
+      + exact Hpi.
+      + split.
+        * exact Hw.
+        * unfold adequacy_b_relation in Hrel.
+          refine (
+            match eq_sym Hrel in _ = d return hbisim c' d with
+            | eq_refl => IH c'
+            end).
   Qed.
 
 End HeteroBisim.
