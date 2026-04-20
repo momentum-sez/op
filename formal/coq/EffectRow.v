@@ -378,3 +378,31 @@ Proof. exact subrow_trans. Qed.
     preorder axiom). *)
 Lemma subrow_preorder_refl : forall r, subrow r r = true.
 Proof. exact subrow_refl. Qed.
+
+(** ** Boolean characterisations (2026-04-20) *)
+
+(** mem on a cons is true iff the head matches or the element is in the tail. *)
+Lemma mem_cons_iff : forall e r x,
+  mem e (x :: r) = true <-> (e = x \/ mem e r = true).
+Proof.
+  intros e r x. simpl. split.
+  - intro H. destruct (effect_eq_dec e x).
+    + left. assumption.
+    + right. assumption.
+  - intros [Heq | Hmem].
+    + subst. destruct (effect_eq_dec x x); [reflexivity | contradiction].
+    + destruct (effect_eq_dec e x); [reflexivity | assumption].
+Qed.
+
+(** subrow on a cons-left decomposes into membership in r2 + recurse. *)
+Lemma subrow_cons_iff : forall e r1 r2,
+  subrow (e :: r1) r2 = true <-> (mem e r2 = true /\ subrow r1 r2 = true).
+Proof.
+  intros e r1 r2. simpl. split.
+  - intro H. apply andb_true_iff in H. exact H.
+  - intro H. apply andb_true_iff. exact H.
+Qed.
+
+(** An empty row is below every row. *)
+Lemma subrow_empty_below : forall r, subrow [] r = true.
+Proof. reflexivity. Qed.
