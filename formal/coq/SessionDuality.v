@@ -161,3 +161,36 @@ Proof. reflexivity. Qed.
     the direct observation that end and bare var are self-dual
     as named lemmas above. *)
 
+(** ** Concrete non-self-dual witnesses (2026-04-20) *)
+
+(** L_Send with a continuation that duals is NOT self-dual.  Concrete
+    witness that duality is a non-trivial operation on most [ltype]s. *)
+Theorem send_not_self_dual :
+  forall l t, dual (L_Send l t L_End) <> L_Send l t L_End.
+Proof. intros l t. simpl. discriminate. Qed.
+
+(** L_Recv is never self-dual for the same reason. *)
+Theorem recv_not_self_dual :
+  forall l t, dual (L_Recv l t L_End) <> L_Recv l t L_End.
+Proof. intros l t. simpl. discriminate. Qed.
+
+(** L_Mu is not self-dual in general: body flips send/recv. *)
+Theorem mu_send_not_self_dual :
+  forall x l t, dual (L_Mu x (L_Send l t (L_Var x)))
+             <> L_Mu x (L_Send l t (L_Var x)).
+Proof. intros x l t. simpl. discriminate. Qed.
+
+(** [dual] on L_Send l t K produces L_Recv l t (dual K). *)
+Theorem dual_send_structure :
+  forall l t K, exists K', dual (L_Send l t K) = L_Recv l t K'.
+Proof.
+  intros l t K. exists (dual K). reflexivity.
+Qed.
+
+(** [dual] on L_Recv l t K produces L_Send l t (dual K). *)
+Theorem dual_recv_structure :
+  forall l t K, exists K', dual (L_Recv l t K) = L_Send l t K'.
+Proof.
+  intros l t K. exists (dual K). reflexivity.
+Qed.
+
