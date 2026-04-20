@@ -281,6 +281,59 @@ Proof. apply bilateral_duality. Qed.
     the ack-erased projection of [G_corridor_ack].  We express this
     as a direct syntactic comparison on the prefix shared by both
     global types. *)
+(** * Further structural properties (2026-04-20) *)
+
+(** Sender and receiver are always distinct. *)
+Lemma sender_neq_receiver : forall d, sender d <> receiver d.
+Proof. destruct d; discriminate. Qed.
+
+(** Sender-receiver-other identity. *)
+Lemma sender_other_is_receiver : forall d, other (sender d) = receiver d.
+Proof. destruct d; reflexivity. Qed.
+
+(** Direction is determined by sender or receiver. *)
+Lemma direction_from_sender :
+  forall d1 d2, sender d1 = sender d2 -> d1 = d2.
+Proof. destruct d1, d2; simpl; intro H; try reflexivity; discriminate. Qed.
+
+Lemma direction_from_receiver :
+  forall d1 d2, receiver d1 = receiver d2 -> d1 = d2.
+Proof. destruct d1, d2; simpl; intro H; try reflexivity; discriminate. Qed.
+
+(** bproject on BG_End is always L_End regardless of role. *)
+Theorem bproject_end : forall r, bproject BG_End r = L_End.
+Proof. intros r. reflexivity. Qed.
+
+(** Dual is injective. *)
+Theorem dual_injective_ltype :
+  forall L1 L2, dual L1 = dual L2 -> L1 = L2.
+Proof.
+  intros L1 L2 H.
+  rewrite <- (dual_involution L1), <- (dual_involution L2).
+  f_equal. exact H.
+Qed.
+
+(** Dual of L_End is L_End (self-dual). *)
+Theorem dual_L_End : dual L_End = L_End.
+Proof. reflexivity. Qed.
+
+(** [bproject G (other r)] is the dual of [bproject G r]; equivalently,
+    [bproject] composes with [other] is the same as post-composing
+    with [dual]. *)
+Theorem bproject_commutes_with_other :
+  forall G r, bproject G (other r) = dual (bproject G r).
+Proof. exact bprojection_dual. Qed.
+
+(** [bproject G r] and [bproject G (other r)] are mutual duals. *)
+Theorem bproject_mutual_dual :
+  forall G r,
+    dual (bproject G r) = bproject G (other r) /\
+    dual (bproject G (other r)) = bproject G r.
+Proof.
+  intros G r. rewrite bproject_commutes_with_other.
+  split; [reflexivity|]. apply dual_involution.
+Qed.
+
 Lemma G_corridor_prefix_shared :
   forall r,
     (* prefix of the bilateral projection up to the Commit | Abort
