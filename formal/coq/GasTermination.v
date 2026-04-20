@@ -108,4 +108,73 @@ Module GasTerminationTheory (G : GasStepSemantics).
   Definition zero_gas_terminal (c : G.conf) : Prop :=
     G.gas c = 0 -> normal_form c.
 
+  (** Every configuration with zero gas is automatically a normal
+      form: any step would decrease gas strictly below zero, which
+      is impossible for a nat. *)
+  Theorem zero_gas_is_normal_form :
+    forall c, G.gas c = 0 -> normal_form c.
+  Proof.
+    intros c Hgas c' Hstep.
+    pose proof (G.gas_decreases Hstep) as Hdec.
+    rewrite Hgas in Hdec. inversion Hdec.
+  Qed.
+
+  (** Zero-gas configurations satisfy the [zero_gas_terminal]
+      definition trivially. *)
+  Theorem all_zero_gas_terminal : forall c, zero_gas_terminal c.
+  Proof.
+    intros c. unfold zero_gas_terminal.
+    apply zero_gas_is_normal_form.
+  Qed.
+
+  (** ** Trace structural properties *)
+
+  (** A length-zero trace is the identity. *)
+  Theorem trace_zero_iff_same : forall c c',
+    trace c c' 0 <-> c = c'.
+  Proof.
+    intros c c'. split.
+    - intros H. inversion H. reflexivity.
+    - intros Heq. subst c'. apply trace_nil.
+  Qed.
+
+  (** Trace composition: concatenating two traces yields a trace. *)
+  Theorem trace_trans : forall c c' c'' n m,
+    trace c c' n -> trace c' c'' m -> trace c c'' (n + m).
+  Proof.
+    intros c c' c'' n m H1.
+    revert c'' m.
+    induction H1 as [c0 | c0 c1 c2 n' Hstep Hrest IH];
+      intros c'' m H2.
+    - simpl. exact H2.
+    - simpl. eapply trace_cons; [exact Hstep | apply IH; exact H2].
+  Qed.
+
+  (** A single step embeds as a length-1 trace. *)
+  Theorem step_is_trace : forall c c',
+    G.step c c' -> trace c c' 1.
+  Proof.
+    intros c c' H.
+    eapply trace_cons; [exact H | apply trace_nil].
+  Qed.
+
+  (** Gas bounds the maximum reduction length: no trace can exceed
+      [G.gas c] steps. *)
+  Theorem trace_length_never_exceeds_gas :
+    forall c c' n, trace c c' n -> n <= G.gas c.
+  Proof. exact trace_bounded. Qed.
+
+  (** Normal forms have no outgoing traces of length > 0. *)
+  Theorem normal_form_no_positive_trace :
+    forall c c' n,
+      normal_form c ->
+      trace c c' n ->
+      n = 0.
+  Proof.
+    intros c c' n Hnf Htrace.
+    destruct Htrace as [|c1 c2 c3 n' Hstep Htail].
+    - reflexivity.
+    - exfalso. apply (Hnf _ Hstep).
+  Qed.
+
 End GasTerminationTheory.
