@@ -158,3 +158,59 @@ Proof.
   intros e g.
   apply OpTermination.all_strongly_normalizing.
 Qed.
+
+(** * Further structural properties (2026-04-20) *)
+
+(** Terminal expressions are decidable. *)
+Theorem terminal_expr_dec :
+  forall e, {terminal_expr e} + {~ terminal_expr e}.
+Proof.
+  intros e. destruct e; simpl.
+  all: try (right; intro H; exact H).
+  all: left; exact I.
+Qed.
+
+(** A terminal expression cannot step. *)
+Theorem terminal_no_step :
+  forall e g c',
+    terminal_expr e ->
+    ~ step (mk_config e g) c'.
+Proof.
+  intros e g c' Hterm Hstep.
+  inversion Hstep; subst.
+  apply H2. exact Hterm.
+Qed.
+
+(** A zero-gas configuration cannot step. *)
+Theorem zero_gas_no_step :
+  forall e c',
+    ~ step (mk_config e 0) c'.
+Proof.
+  intros e c' Hstep. inversion Hstep.
+Qed.
+
+(** reduce_expr is idempotent on terminal inputs. *)
+Theorem reduce_expr_terminal_idempotent :
+  reduce_expr E_Halted = E_Halted /\
+  reduce_expr E_SanctionsBlocked = E_SanctionsBlocked /\
+  reduce_expr E_OutOfGas = E_OutOfGas.
+Proof. repeat split. Qed.
+
+(** The reduce_expr of E_Sanctions is always E_SanctionsBlocked. *)
+Theorem reduce_expr_sanctions :
+  forall e, reduce_expr (E_Sanctions e) = E_SanctionsBlocked.
+Proof. intros e. reflexivity. Qed.
+
+(** reduce_expr of E_Let returns the body unchanged. *)
+Theorem reduce_expr_let_body :
+  forall n e1 e2, reduce_expr (E_Let n e1 e2) = e2.
+Proof. intros n e1 e2. reflexivity. Qed.
+
+(** After a step, gas strictly decreased by exactly 1. *)
+Theorem step_gas_exact_decrement :
+  forall e g c',
+    step (mk_config e (S g)) c' ->
+    cfg_gas c' = g.
+Proof.
+  intros e g c' Hstep. inversion Hstep; subst. reflexivity.
+Qed.
