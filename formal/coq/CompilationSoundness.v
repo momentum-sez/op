@@ -331,20 +331,20 @@ Inductive SanctOpExpr : Type :=
   | SOE_Lit  : OpExpr -> SanctOpExpr
   | SOE_Call : string -> SanctOpExpr -> SanctOpExpr.
 
-(** Host primitive. Axiomatized as a deterministic function from
-    principals to the two-element verdict set.
+(** Host primitive. Parameterized as a deterministic function from
+    principals to the verdict lattice; production wiring supplies a
+    concrete implementation bound to the sanctions backend.
 
-    [host_sanctions_range] is kept as a reserved interface for the
-    two-valued sanity check below; the theorem
+    The two-valued range obligation is NOT a file-level [Axiom]: it is
+    a [Hypothesis] on the sanity-check Example below, scoped to the
+    [SanctionsRangeSanity] Section so that any consumer of the Example
+    must discharge the obligation with a proof for the host they are
+    binding.  The main preservation theorem
     [verdict_preservation_sanctions] depends only on the shared-model
-    parameter [host_sanctions] itself. *)
+    parameter [host_sanctions] itself and carries no range
+    obligation. *)
 
 Parameter host_sanctions : LexValue -> LexValue.
-
-Axiom host_sanctions_range :
-  forall p,
-    host_sanctions p = LV_Str "Compliant" \/
-    host_sanctions p = LV_Str "SanctionsBlocked".
 
 (** Lex reduction for the sanctions head. A [SLT_Const v_p] emits its
     scalar [v_p] in one observable step; [SLT_Sanctions p] emits
@@ -472,7 +472,19 @@ Proof.
     apply SLexStepConst.
 Qed.
 
-(** Sanity. The verdict is always one of the two host outputs. *)
+(** Sanity. The verdict is always one of the two host outputs.
+    Scoped to a Section that takes the two-valued range as an
+    explicit [Hypothesis]; the Example's signature after the Section
+    closes therefore universally quantifies the range proof, so any
+    consumer must discharge it with a proof for the concrete host
+    they are binding. *)
+
+Section SanctionsRangeSanity.
+
+Hypothesis host_sanctions_range :
+  forall p,
+    host_sanctions p = LV_Str "Compliant" \/
+    host_sanctions p = LV_Str "SanctionsBlocked".
 
 Example sanctions_verdict_is_two_valued :
   forall v_p,
@@ -486,6 +498,8 @@ Proof.
   - right. exists (SLT_Sanctions (SLT_Const v_p)). rewrite <- Hb.
     apply SLexStepSanctions. constructor.
 Qed.
+
+End SanctionsRangeSanity.
 
 (* ------------------------------------------------------------------ *)
 (**  10.  Variable case.                                              *)
