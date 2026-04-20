@@ -293,3 +293,59 @@ Proof.
   intros r1 r2. unfold row_has_write, runion.
   apply existsb_app.
 Qed.
+
+(** ** Further subrow / union properties *)
+
+(** Left injection into a union: every element of [r1] is in
+    [runion r1 r2]. *)
+Lemma subrow_union_left : forall r1 r2,
+  subrow r1 (runion r1 r2) = true.
+Proof.
+  intros r1 r2. apply subrow_app_left. apply subrow_refl.
+Qed.
+
+(** The empty row is subrow of any row: bottom of the lattice. *)
+Lemma subrow_empty_bot : forall r, subrow [] r = true.
+Proof. intros r. reflexivity. Qed.
+
+(** Subrow monotonicity under union: if [r1 ⊆ r1'] and [r2 ⊆ r2'],
+    then [runion r1 r2 ⊆ runion r1' r2']. *)
+Lemma subrow_union_monotone : forall r1 r1' r2 r2',
+  subrow r1 r1' = true ->
+  subrow r2 r2' = true ->
+  subrow (runion r1 r2) (runion r1' r2') = true.
+Proof.
+  intros r1 r1' r2 r2' H1 H2.
+  apply union_is_join.
+  - apply subrow_app_left. exact H1.
+  - apply subrow_weaken_left. exact H2.
+Qed.
+
+(** Union-idempotence at the subrow level: [r ∪ r ⊆ r]. *)
+Lemma subrow_union_self : forall r, subrow (runion r r) r = true.
+Proof.
+  intros r. apply union_is_join.
+  - apply subrow_refl.
+  - apply subrow_refl.
+Qed.
+
+(** Sanctions cannot be added by weakening an empty row. *)
+Lemma has_sanctions_empty : has_sanctions [] = false.
+Proof. reflexivity. Qed.
+
+(** A row that lies below a sanctions-free row is itself
+    sanctions-free.  Formally: if [subrow r1 r2] and
+    [has_sanctions r2 = false], then [has_sanctions r1 = false]. *)
+Lemma subrow_preserves_no_sanctions : forall r1 r2,
+  subrow r1 r2 = true ->
+  has_sanctions r2 = false ->
+  has_sanctions r1 = false.
+Proof.
+  intros r1 r2 Hsub Hno.
+  destruct (has_sanctions r1) eqn:Hs1; [|reflexivity].
+  (* Contradiction: r1 has sanctions, r1 ⊆ r2, so r2 has sanctions too. *)
+  exfalso.
+  unfold has_sanctions in *.
+  apply (subrow_mem _ _ _ Hsub) in Hs1.
+  rewrite Hs1 in Hno. discriminate.
+Qed.
