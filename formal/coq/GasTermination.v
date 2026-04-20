@@ -177,4 +177,52 @@ Module GasTerminationTheory (G : GasStepSemantics).
     - exfalso. apply (Hnf _ Hstep).
   Qed.
 
+  (** ** Further trace properties (2026-04-20) *)
+
+  (** A trace of length zero is the reflexive trace on the same conf. *)
+  Theorem trace_zero_reflexive :
+    forall c c', trace c c' 0 -> c = c'.
+  Proof.
+    intros c c' H. inversion H. reflexivity.
+  Qed.
+
+  (** If gas(c) = 0, then the only trace from c is the zero-length trace. *)
+  Theorem zero_gas_only_trivial_trace :
+    forall c c' n, G.gas c = 0 -> trace c c' n -> n = 0 /\ c = c'.
+  Proof.
+    intros c c' n Hgas Htrace.
+    pose proof (trace_bounded Htrace) as Hb.
+    assert (n = 0) by lia. split; [exact H|].
+    subst n. inversion Htrace. reflexivity.
+  Qed.
+
+  (** Gas never increases along any trace (strictly non-increasing). *)
+  Theorem gas_non_increasing :
+    forall c c' n, trace c c' n -> G.gas c' <= G.gas c.
+  Proof.
+    intros c c' n H. pose proof (trace_gas_decreases H) as Hg. lia.
+  Qed.
+
+  (** Strict gas decrease across a positive-length trace. *)
+  Theorem gas_strict_decrease_positive_trace :
+    forall c c' n, trace c c' n -> 0 < n -> G.gas c' < G.gas c.
+  Proof.
+    intros c c' n H Hpos. pose proof (trace_gas_decreases H) as Hg. lia.
+  Qed.
+
+  (** A normal form cannot have gas of a positive trace ending at it
+      from a distinct configuration.  Contrapositive form of
+      [normal_form_no_positive_trace]. *)
+  Theorem gas_zero_end_normal :
+    forall c c' n,
+      trace c c' n ->
+      G.gas c' = 0 ->
+      normal_form c'.
+  Proof.
+    intros c c' n _ Hgas.
+    intros c'' Hstep.
+    pose proof (G.gas_decreases Hstep) as Hd.
+    rewrite Hgas in Hd. inversion Hd.
+  Qed.
+
 End GasTerminationTheory.
