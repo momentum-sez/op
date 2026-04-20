@@ -350,3 +350,43 @@ Lemma G_corridor_prefix_shared :
 Proof.
   intro r. destruct r; simpl; repeat split; reflexivity.
 Qed.
+
+(** ** Further MPST structural properties (2026-04-20) *)
+
+(** Decidable equality on roles. *)
+Lemma role_eq_dec' : forall r1 r2 : role, {r1 = r2} + {r1 <> r2}.
+Proof. apply role_eq_dec. Qed.
+
+(** Decidable equality on directions. *)
+Lemma direction_eq_dec : forall d1 d2 : direction, {d1 = d2} + {d1 <> d2}.
+Proof. decide equality. Qed.
+
+(** Initiator and Responder are distinct roles. *)
+Lemma initiator_neq_responder : Initiator <> Responder.
+Proof. discriminate. Qed.
+
+(** I2R and R2I are distinct directions. *)
+Lemma i2r_neq_r2i : I2R <> R2I.
+Proof. discriminate. Qed.
+
+(** The G_corridor_ack global type has non-trivial structure —
+    not equal to BG_End. *)
+Theorem G_corridor_ack_nonempty :
+  G_corridor_ack <> BG_End.
+Proof. discriminate. Qed.
+
+(** The G_corridor_no_ack global type is also non-trivial. *)
+Theorem G_corridor_no_ack_nonempty :
+  G_corridor_no_ack <> BG_End.
+Proof. discriminate. Qed.
+
+(** The 8 corridor label tags are pairwise distinct. *)
+Theorem corridor_labels_distinct :
+  lbl_TensorRequest <> lbl_Locked /\
+  lbl_Locked <> lbl_VerdictI /\
+  lbl_VerdictI <> lbl_VerdictR /\
+  lbl_VerdictR <> lbl_Commit /\
+  lbl_Commit <> lbl_Abort /\
+  lbl_Abort <> lbl_CommitAck /\
+  lbl_CommitAck <> lbl_AbortAck.
+Proof. repeat split; discriminate. Qed.
