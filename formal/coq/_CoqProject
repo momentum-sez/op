@@ -31,3 +31,9 @@ OpPaperTargetsInstance.v
 OpPaperTargetsModuleType.v
 UpToTauCounterexample.v
 LexOpAdequacy.v
+
+# F-OP-FORMAL — Op/ subdir (M-F1 scaffold: syntax + semantics).
+# Build these with: coqc -Q Op Op Op/Syntax.v Op/Semantics.v
+-Q Op Op
+Op/Syntax.v
+Op/Semantics.v
