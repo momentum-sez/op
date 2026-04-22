@@ -1,5 +1,9 @@
 # CLAUDE.md — Op
 
+> **Canonical ecosystem rules live in `~/ecosystem/INVARIANTS.md` (Mass / Momentum / Moxie internal master).** This repository is Apache-2.0 public, so the relevant canonical blocks are **inlined verbatim below** to keep external clones self-contained. Changes land in the master first, then propagate here via the deliberate sync procedure (see `~/ecosystem/survey.sh`).
+
+---
+
 <!-- BEGIN ALWAYS-DEEP-SEMANTIC-MERGE (canonical rule — do not remove or edit) -->
 
 ## NON-NEGOTIABLE: Always do deep semantic merges — never rewrite
