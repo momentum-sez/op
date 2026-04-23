@@ -24,12 +24,14 @@ or private dependencies are required.
 
 Rust toolchain is pinned by `rust-toolchain.toml` at the repository root:
 
-- Channel: `1.84.0` (stable)
+- Channel: `1.86.0` (stable)
 - Components: `rustfmt`, `clippy`
 - Profile: `minimal`
 
 `rustup` honors this file automatically. The workspace MSRV declared in
-`Cargo.toml` is `1.76`; the pin sits above MSRV and is the version CI runs.
+`Cargo.toml` is `1.76`; the pin sits above MSRV. The pin is `1.86.0`
+because several transitive dependencies (notably `hashbrown 0.17` via
+`indexmap 2.14`) require Rust `edition2024`, stabilized in `1.85.0`.
 
 Coq mechanization is checked against:
 
@@ -44,22 +46,15 @@ Coq mechanization is checked against:
 cargo test --workspace
 ```
 
-Expected: `86` tests pass across the four crates `op-core`, `op-compiler`,
+Expected: `97` tests pass across the four crates `op-core`, `op-compiler`,
 `op-stdlib`, `op-lex-compiler`. Zero failures. Doc-tests contribute one
 `ignored` entry from `op_lex_compiler` (signature-only).
 
-Breakdown by crate at the time this document was written:
-
-| Crate | Unit tests | Integration tests | Total |
-|---|---|---|---|
-| `op-compiler` | 8 | 0 | 8 |
-| `op-core` | 27 | 21 | 48 |
-| `op-lex-compiler` | 11 | 12 | 23 |
-| `op-stdlib` | 7 | 0 | 7 |
-
-Integration test binaries: `compensation_runtime`, `meet_monotonicity`,
+Integration test binaries include `compensation_runtime`, `meet_monotonicity`,
 `proof_bundle_determinism` (op-core); `golden_defeasible_tolling`,
-`golden_flat_fsmr`, `golden_sanctions` (op-lex-compiler).
+`golden_flat_fsmr`, `golden_sanctions` (op-lex-compiler). Exact per-crate
+counts can drift as the test suite grows; `cargo test --workspace` prints
+the running totals.
 
 ### Clippy and rustfmt
 
@@ -93,17 +88,56 @@ The example source is `crates/op-core/examples/hello-op.rs`.
 
 ```
 cd formal/coq
-coqc OpCore.v
-coqc CompilationSoundness.v
+make
 ```
 
-Both commands exit `0` with no diagnostic output on Rocq `9.1.1`. A CI job
-runs these commands in the `rocq/rocq:9.1` container on every push.
+The default `Makefile` target invokes `coq_makefile -f _CoqProject` and
+`coqc` each listed `.v` file under Rocq Prover `9.1.1`. A CI job runs the
+same build in the `rocq/rocq:9.1` container on every push.
 
-`CompilationSoundness.v` closes the scalar-constant case and the
-sanctions-dominance case with `Qed.` (full proofs). The remaining seven
-obligations listed in `formal/coq/README.md` are registered as `Admitted`
-theorems with declared proof strategies.
+Current Qed-closed state (see the companion Op paper §8.5 for the
+authoritative inventory and Axiom/Parameter disclosure):
+
+- `CompilationSoundness.v`: all nine Lex→Op compilation cases close with
+  `Qed.` — `verdict_preservation_const`, `_sanctions`, `_var`,
+  `_const_record`, `_const_list`, `_const_variant`, `_match`,
+  `_defeasible`, `_fill`. Zero `Admitted.`
+- `LexOpAdequacy.v`: top-level `lex_op_adequacy` plus supporting
+  theorems `lex_op_adequacy_bisim`, `lex_op_adequacy_congruence`,
+  `lex_op_adequacy_injective`, `admissible_compile_respects_verdict`
+  close with `Qed.`
+- `SessionCorridor.v`, `MPSTProjection.v`: six-message bilateral
+  corridor deadlock-freedom, session safety, ack harmonisation, and
+  duality theorems close with `Qed.` The message `payload` type is an
+  uninterpreted `Parameter` in both files.
+- `BSCInvariants.v`: invariants I1/I2/I3 and the per-rule preservation
+  theorems close with `Qed.` over an abstract four-component corridor
+  history record.
+- `WireFormatVerifier.v`: the five-byte canonical wire format's
+  round-trip, injectivity, determinism, and six rejection-class
+  theorems close with `Qed.`
+- `LexVerdictEmbedding.v`: the Lex→Op verdict embedding `lex_to_op`
+  and its properties (injective, rank-monotone, meet-preserving)
+  close with `Qed.`
+- `CanonicalEncoding.v`, `ComplianceContext.v`, `EffectRow.v`: each
+  closes its module-local Qed obligations.
+
+Five paper-level theorems — termination, progress, subject reduction,
+effect monotonicity, and parallel confluence — are Qed-closed only over
+concrete toy fragments (lambda calculus in `OpProgressSubject.v`, a
+nine-constructor gasified AST in `OpConcreteAST.v`, a two-slot counter
+machine in `OpEffectMonotonicity.v`). The abstract Module Type in
+`OpPaperTargetsModuleType.v` is witnessed by these toy instances in
+`OpPaperTargetsInstance.v`. Inhabitation of the Module Type by a toy
+instance does not establish the theorem for Op proper.
+
+Axioms and Parameters beyond `CompilationSoundness.host_sanctions` and
+`CompilationSoundness.prelude` exist in several parametric-interface
+modules (`BundleAppendOnly.v`, `CorridorMonotone.v`, `GasTermination.v`,
+`UpToTauCompatibility.v`, `HeteroBisimulation.v`, plus
+`MPSTProjection.payload` / `SessionDuality.payload`). Op paper §8.5
+itemises every file- or module-level `Parameter` and `Axiom` in the
+mechanization. No classical axioms are imported or used.
 
 ### Formal artifacts (Lean)
 

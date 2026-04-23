@@ -19,3 +19,8 @@ Cargo.lock.bak
 # Editor
 *.swp
 *~
+
+# Local-only instruction / discipline files (not part of the public repo)
+CLAUDE.md
+SUPREMUM.md
+SUPREMUM-DISCIPLINE.md

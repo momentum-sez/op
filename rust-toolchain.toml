@@ -6,6 +6,6 @@
 # maintainer machine and CI exactly.
 
 [toolchain]
-channel = "1.84.0"
+channel = "1.86.0"
 components = ["rustfmt", "clippy"]
 profile = "minimal"
