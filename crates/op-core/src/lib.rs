@@ -61,11 +61,11 @@ pub mod types;
 
 pub use ast::{
     ApprovalMode, BinOp, CardinalityCertificate, CompensationClause, Contract, Contracts, Effect,
-    ExprNode, FailureAction, GasBudget, GovernanceRequirement, MatchArm, OpExpr, OpProgram,
-    OpStep, OpType, Outcome, Participant, ParticipantRole, Primitive, ProgramMetadata,
-    SafetyPredicate, Statement, StepBody, StepSig, StepSignature, UnOp, WaitSpec,
+    ExprNode, FailureAction, GasBudget, GovernanceRequirement, MatchArm, OpExpr, OpProgram, OpStep,
+    OpType, Outcome, Participant, ParticipantRole, Primitive, ProgramMetadata, SafetyPredicate,
+    Statement, StepBody, StepSig, StepSignature, UnOp, WaitSpec,
 };
-pub use effects::{EffectRow, EffectSafetyError, check_effect_safety};
+pub use effects::{check_effect_safety, EffectRow, EffectSafetyError};
 pub use error::OpError;
 pub use gas::{GasConfig, GasEstimate, GasMeter};
 pub use host::{HostError, HostOutcome, OpHost, PrimitiveCall};

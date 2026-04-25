@@ -201,11 +201,7 @@ fn net_state_is_recoverable_but_history_is_preserved() {
 
     assert_eq!(commits, 1, "forward commit must remain in μ");
     assert_eq!(comps, 1, "compensation must be its own entry");
-    assert_eq!(
-        log.entries.len(),
-        commits + comps,
-        "no hidden entry kinds"
-    );
+    assert_eq!(log.entries.len(), commits + comps, "no hidden entry kinds");
 }
 
 #[test]
@@ -224,7 +220,11 @@ fn multiple_compensations_append_in_reverse_topological_order() {
     log.append_compensation("inv_2", c2);
     log.append_compensation("inv_1", c1);
 
-    let kinds: Vec<_> = log.entries.iter().map(|e| (&e.kind, e.step.as_str())).collect();
+    let kinds: Vec<_> = log
+        .entries
+        .iter()
+        .map(|e| (&e.kind, e.step.as_str()))
+        .collect();
     assert_eq!(
         kinds,
         vec![

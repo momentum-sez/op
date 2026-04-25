@@ -23,8 +23,8 @@
 
 use op_core::host::{HostError, HostOutcome, OpHost, PrimitiveCall};
 use op_core::{
-    program_effect_row, typecheck_program, Contracts, Effect, GasBudget, OpExpr, OpProgram,
-    OpStep, OpType, Primitive, ProgramMetadata, Statement, StepBody, StepSignature,
+    program_effect_row, typecheck_program, Contracts, Effect, GasBudget, OpExpr, OpProgram, OpStep,
+    OpType, Primitive, ProgramMetadata, Statement, StepBody, StepSignature,
 };
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
@@ -58,7 +58,7 @@ fn main() {
     // 4. Two scenarios. Each drives the host with a different input.
     //    The host embeds the compliance rule; Op carries the scaffolding.
     let scenarios = [
-        ("admit", "sg", 5_000),     // Singapore, USD 50.00 — well below threshold, clean list
+        ("admit", "sg", 5_000), // Singapore, USD 50.00 — well below threshold, clean list
         ("deny", "kp", 50_000_000), // sanctioned jurisdiction, USD 500,000 — rule denies
     ];
 
@@ -84,7 +84,9 @@ fn execute(program: &OpProgram, host: &RuleHost) -> ExecutionVerdict {
     let mut admit = true;
     let mut reason = String::from("all gates passed");
     for stmt in &program.body {
-        let Statement::Step(step) = stmt else { continue };
+        let Statement::Step(step) = stmt else {
+            continue;
+        };
         let StepBody::Primitive(prim, args) = &step.body else {
             continue;
         };
@@ -118,7 +120,11 @@ fn execute(program: &OpProgram, host: &RuleHost) -> ExecutionVerdict {
             }
         }
     }
-    ExecutionVerdict { admit, outcomes, reason }
+    ExecutionVerdict {
+        admit,
+        outcomes,
+        reason,
+    }
 }
 
 /// The proof-certificate shape Op produces. A production host emits the
@@ -134,7 +140,11 @@ fn render_certificate(
     println!("composed effects: {:?}", program_effect_row(program));
     println!(
         "gas (structural): {} units",
-        check.gas_analysis.as_ref().map(|g| g.structural_bound).unwrap_or(0)
+        check
+            .gas_analysis
+            .as_ref()
+            .map(|g| g.structural_bound)
+            .unwrap_or(0)
     );
     println!("trace           :");
     for (id, outcome) in &verdict.outcomes {
@@ -179,7 +189,10 @@ fn build_program() -> OpProgram {
             Primitive("fiscal.threshold_check".to_string()),
             vec![
                 ("amount".to_string(), OpExpr::Var("amount".to_string())),
-                ("threshold".to_string(), OpExpr::Int(LOW_VALUE_THRESHOLD_MINOR_UNITS)),
+                (
+                    "threshold".to_string(),
+                    OpExpr::Int(LOW_VALUE_THRESHOLD_MINOR_UNITS),
+                ),
             ],
         ),
         signature: StepSignature {
@@ -201,10 +214,15 @@ fn build_program() -> OpProgram {
         jurisdiction: "_default".to_string(),
         metadata: ProgramMetadata {
             version: "0.1.0".to_string(),
-            description: "Deny if counterparty jurisdiction is sanctioned and amount exceeds threshold.".to_string(),
+            description:
+                "Deny if counterparty jurisdiction is sanctioned and amount exceeds threshold."
+                    .to_string(),
         },
         inputs: vec![
-            ("counterparty_jurisdiction".to_string(), OpType::JurisdictionRef),
+            (
+                "counterparty_jurisdiction".to_string(),
+                OpType::JurisdictionRef,
+            ),
             ("amount".to_string(), OpType::Int),
         ],
         outputs: vec![("admit".to_string(), OpType::Bool)],
@@ -239,22 +257,26 @@ impl OpHost for RuleHost {
         match call.primitive.0.as_str() {
             "screening.sanctions" => {
                 // Admit unless the jurisdiction is on the sanctions list.
-                let sanctioned = SANCTIONED_JURISDICTIONS
-                    .contains(&self.counterparty_jurisdiction.as_str());
+                let sanctioned =
+                    SANCTIONED_JURISDICTIONS.contains(&self.counterparty_jurisdiction.as_str());
                 // Policy rule: jurisdiction on the list + amount over
                 // threshold → deny outright.
                 if sanctioned && self.amount > LOW_VALUE_THRESHOLD_MINOR_UNITS {
                     return Err(HostError::PolicyRejection(format!(
                         "counterparty jurisdiction '{}' is sanctioned and amount {} exceeds \
                          threshold {}",
-                        self.counterparty_jurisdiction, self.amount, LOW_VALUE_THRESHOLD_MINOR_UNITS
+                        self.counterparty_jurisdiction,
+                        self.amount,
+                        LOW_VALUE_THRESHOLD_MINOR_UNITS
                     )));
                 }
                 Ok(HostOutcome::Completed(json!(!sanctioned)))
             }
             "fiscal.threshold_check" => {
                 // Admit only when amount is below the threshold.
-                Ok(HostOutcome::Completed(json!(self.amount <= LOW_VALUE_THRESHOLD_MINOR_UNITS)))
+                Ok(HostOutcome::Completed(json!(
+                    self.amount <= LOW_VALUE_THRESHOLD_MINOR_UNITS
+                )))
             }
             other => Err(HostError::UnknownPrimitive(other.to_string())),
         }

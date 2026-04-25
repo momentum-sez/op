@@ -17,7 +17,7 @@ pre-existing `.vo` cache.
 |--------------------|---------------------------------------------------------|
 | Machine            | Apple M4 Max, 16 cores, 128 GB RAM                      |
 | Operating system   | macOS 26.2 (Darwin 25.2.0 kernel)                       |
-| Rust toolchain     | `rustc 1.95.0-nightly (859951e3c 2026-02-24)`           |
+| Rust toolchain     | Repo pin: `rustc 1.86.0`; historical snapshot collected with `rustc 1.95.0-nightly (859951e3c 2026-02-24)` |
 | Rocq / Coq         | Rocq Prover 9.1.1, compiled with OCaml 5.4.1            |
 | Benchmark harness  | Criterion 0.5                                           |
 | Workload seed      | Deterministic: fixed step IDs, fixed literal arguments  |
@@ -71,10 +71,10 @@ into a replay trace.
 | 256    | 94.84 µs     | ± 464 ns                  | 370 ns        |
 
 Per-step cost is stable at ~370 ns across all sizes — consistent with
-`O(N)` walker shape plus a fixed-cost JSON-reduction per primitive
-call. The structural gas bill emitted by the type checker is 8 units
-per sovereign-write step plus 4 units for the sanctions gate, matching
-the cost table declared in `op-core::gas::StructuralCostTable`.
+`O(N)` walker shape plus a fixed-cost JSON-reduction per primitive call. The
+current structural gas table is construct-shaped (`step_cost = 10` by
+default), not effect-specific; hosts may replace `StructuralCostTable` for
+deployment economics.
 
 ### B3 — Effect-row composition (`program_effect_row`)
 
@@ -131,7 +131,7 @@ second from a cold `.vo` cache.
 
 - **Catala** (ICFP 2021) — the Catala tax-rule compiler reports
   whole-corpus compilation in the low-seconds range for 1000-rule
-  corpora. Op compiles 100 admissible Lex terms in 48 µs, so a direct
+  corpora. The Op Lex-to-Op compiler handles 100 admissible Lex terms in 48 µs, so a direct
   per-term scaling would be approximately 0.5 ms for 1000 terms
   (within a generous constant factor; corpora are not drawn from the
   same distribution, and Catala performs tax-specific desugaring Op

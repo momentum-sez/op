@@ -10,8 +10,15 @@ core typing judgment, effect-row algebra, and linearity / lock discipline.
 
 ## Status
 
-Placeholder. Neither scaffold has been populated with mechanized proofs yet.
-The target obligations are:
+The Coq tree contains scoped closed fragments: effect-row algebra,
+bundle-append monotonicity, gas termination, Op progress/subject reduction
+for the modeled fragment, Lex verdict embedding, and the nine-case
+`L_adm -> Op` verdict-preservation skeleton. The Lean tree remains a
+scaffold. The `coq/Op/` subtree is an M-F1 syntax/semantics scaffold for Op
+proper; full Op-proper compiler correctness, preservation, and progress are
+still target obligations.
+
+The remaining obligations are:
 
 - **Type preservation under lowering.** For every well-typed Op program `e`,
   its lowered YAML operation-definition `[[e]]` preserves the typing judgment.

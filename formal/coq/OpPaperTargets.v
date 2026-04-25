@@ -58,11 +58,11 @@ Section PaperTargets.
       here under abstract Parameters, which meant they were axiomatic
       stubs rather than proofs.
 
-      They are now superseded by:
+      They are now superseded at the signature-witness level by:
 
       - [OpPaperTargetsModuleType.v]: Module Type + concrete Module
         [OpPaperTargetsConcrete] instantiating each abstract Parameter
-        with a concrete definition drawn from the Op AST files
+        with a concrete toy/core definition drawn from the Op AST files
         (OpConcreteAST, OpProgressSubject, OpEffectMonotonicity) and
         closing each of the 5 theorems with [Qed].
 
@@ -71,6 +71,11 @@ Section PaperTargets.
         [op_progress] / [op_subject_reduction] (from OpProgressSubject),
         [op_effect_monotonicity_empty_start] and
         [par_confluence_diamond] (from OpEffectMonotonicity), all Qed.
+
+      These witnesses prove that the theorem signatures are consistent;
+      they are not yet proofs of the paper theorems for Op proper. The
+      Op-proper closure remains tied to the [formal/coq/Op/] typing,
+      progress, preservation, and effect-semantics milestones.
 
       This file retains the parametric-interface section (Config,
       abstract Parameters, TerminalTag) as documentation of the

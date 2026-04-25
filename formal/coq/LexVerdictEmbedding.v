@@ -4,14 +4,14 @@
 
     This file closes the E1 alignment obligation identified by the
     2026-04-20 platonic-ideal kickstart: the Lex paper and
-    [~/kernel/formal/coq/Lex/VerdictHeyting.v] mechanise a five-element
+    an out-of-tree Lex per-coordinate verdict mechanisation mechanise a five-element
     chain {NonCompliant < Pending < NotApplicable < Exempt < Compliant}
     as the per-(entity, jurisdiction, domain) verdict.  The Op operational
     layer in [ComplianceContext.v] adds a sixth absorbing-bottom
     [CC_Sanctioned] to represent sanctions-blocked execution paths,
     producing the six-valued [cell_verdict].
 
-    Because the op/formal/coq build does not import ~/kernel/formal/coq/Lex
+    Because the op/formal/coq build does not import any out-of-tree Lex
     load paths, we duplicate the Lex verdict carrier locally as
     [lex_verdict] with identical constructors and ordering.  The
     embedding [lex_to_op] maps the five Lex values to the five non-
@@ -52,7 +52,7 @@ Require Import ComplianceContext.
 (** ** Local redefinition of the Lex five-element verdict *)
 
 (** Identical to the [verdict] inductive in
-    [~/kernel/formal/coq/Lex/VerdictHeyting.v].  The embedding below
+    an out-of-tree Lex per-coordinate verdict mechanisation.  The embedding below
     is purely structural, so duplicating the carrier here incurs no
     semantic cost. *)
 Inductive lex_verdict : Type :=
@@ -281,10 +281,9 @@ Qed.
     embedded fragment, and the six-valued operational lattice is a
     conservative extension adding exactly one absorbing value.
 
-    This file, combined with
-    [~/kernel/formal/coq/Lex/TensorAlignment.v] (which mechanises the
-    relationship between the Lex five-chain and the SJN tensor-factor
-    algebra with orthogonal applicability), completes the Coq witness
+    This file, combined with the out-of-tree tensor-alignment
+    mechanisation that relates the Lex five-chain to the SJN tensor-factor
+    algebra with orthogonal applicability, completes the Coq witness
     that the three verdict mechanisations — Lex per-coordinate five-chain
     (VerdictHeyting.v), Op operational six-valued (ComplianceContext.v),
     SJN tensor-factor (TensorAlignment.v) — are mutually compatible

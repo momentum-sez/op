@@ -13,14 +13,13 @@ Cargo.lock.bak
 *.vos
 *.glob
 .*.aux
+formal/coq/CoqMakefile
+formal/coq/CoqMakefile.conf
+formal/coq/.CoqMakefile.d
+formal/coq/.Makefile.d
 .lia.cache
 .nia.cache
 
 # Editor
 *.swp
 *~
-
-# Local-only instruction / discipline files (not part of the public repo)
-CLAUDE.md
-SUPREMUM.md
-SUPREMUM-DISCIPLINE.md

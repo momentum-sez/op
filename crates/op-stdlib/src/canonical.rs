@@ -125,28 +125,19 @@ pub const CANONICAL_PRIMITIVES: &[PrimitiveShape] = &[
     PrimitiveShape {
         name: "consent.board_resolution",
         family: PrimitiveFamily::Consent,
-        default_effects: &[
-            Effect::GovernanceRequest,
-            Effect::SovereignWrite,
-        ],
+        default_effects: &[Effect::GovernanceRequest, Effect::SovereignWrite],
         deferred_subject: false,
     },
     PrimitiveShape {
         name: "consent.member_resolution",
         family: PrimitiveFamily::Consent,
-        default_effects: &[
-            Effect::GovernanceRequest,
-            Effect::SovereignWrite,
-        ],
+        default_effects: &[Effect::GovernanceRequest, Effect::SovereignWrite],
         deferred_subject: false,
     },
     PrimitiveShape {
         name: "consent.shareholder_vote",
         family: PrimitiveFamily::Consent,
-        default_effects: &[
-            Effect::GovernanceRequest,
-            Effect::SovereignWrite,
-        ],
+        default_effects: &[Effect::GovernanceRequest, Effect::SovereignWrite],
         deferred_subject: false,
     },
     // Screening
@@ -232,9 +223,16 @@ mod tests {
     fn every_primitive_has_effects_except_document_generation_only() {
         for p in CANONICAL_PRIMITIVES {
             if p.family == PrimitiveFamily::Document {
-                assert!(p.default_effects.iter().any(|e| *e == Effect::DocumentGeneration));
+                assert!(p
+                    .default_effects
+                    .iter()
+                    .any(|e| *e == Effect::DocumentGeneration));
             } else {
-                assert!(!p.default_effects.is_empty(), "primitive {} has no effects", p.name);
+                assert!(
+                    !p.default_effects.is_empty(),
+                    "primitive {} has no effects",
+                    p.name
+                );
             }
         }
     }

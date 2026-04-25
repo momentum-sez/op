@@ -19,8 +19,8 @@
 //!   3. Dispatch each compensation exactly once.
 
 use op_core::{
-    CompensationClause, Contracts, Effect, GasBudget, OpHost, OpProgram, OpStep, OpType,
-    Primitive, PrimitiveCall, ProgramMetadata, Statement, StepBody, StepSignature,
+    CompensationClause, Contracts, Effect, GasBudget, OpHost, OpProgram, OpStep, OpType, Primitive,
+    PrimitiveCall, ProgramMetadata, Statement, StepBody, StepSignature,
 };
 use std::sync::{Arc, Mutex};
 
@@ -48,10 +48,7 @@ impl RecordingHost {
 }
 
 impl OpHost for RecordingHost {
-    fn invoke(
-        &self,
-        call: &PrimitiveCall,
-    ) -> Result<op_core::HostOutcome, op_core::HostError> {
+    fn invoke(&self, call: &PrimitiveCall) -> Result<op_core::HostOutcome, op_core::HostError> {
         let name = call.primitive.0.clone();
         self.trail.lock().unwrap().push(name.clone());
         if name == self.fail_on {
@@ -206,7 +203,10 @@ fn step1_compensation_runs_once_on_step2_failure() {
         .iter()
         .filter(|n| *n == "booking.cancel_reservation")
         .count();
-    assert_eq!(inverse_hits, 1, "compensation fired {inverse_hits} times; expected 1");
+    assert_eq!(
+        inverse_hits, 1,
+        "compensation fired {inverse_hits} times; expected 1"
+    );
 }
 
 #[test]

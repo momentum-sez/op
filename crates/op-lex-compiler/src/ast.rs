@@ -1,5 +1,5 @@
 //! Minimal `LexTerm` AST — the admissible-fragment subset consumed by the
-//! `[[·]] : Lex -> Op` compilation function.
+//! `[[.]] : L_adm -> Op` compilation function.
 //!
 //! The Lex calculus (see the separate Lex repository) is substantially larger
 //! than what a compilation target for Op needs: temporal modalities, tribunal

@@ -1,17 +1,14 @@
 (** * Op/Syntax.v — Op language syntax mechanization (M-F1)
 
-    Part of the F-OP-FORMAL track:
-    `docs/architecture/frontier-work/F-OP-FORMAL.md` in the kernel
-    repository, scoped under SUPREMUM/26 Tier 5.
-
-    This file is the pure-syntax half of the M-F1 deliverable. The
-    companion operational-semantics file is [Op/Semantics.v].
+    Part of the F-OP-FORMAL milestone track. This file is the pure-syntax
+    half of the M-F1 deliverable; the companion operational-semantics file
+    is [Op/Semantics.v].
 
     ** Goal
 
     Mechanize the Op abstract syntax as an inductive type, closely
     mirroring the Rust reference at
-    `mez/crates/mez-op/src/ast.rs::OpExpr` in the kernel repository.
+    `crates/op-core/src/ast.rs::OpExpr` in this repository.
     No theorems about well-typedness, progress, or preservation are
     formulated here — those live in later milestones (M-F2 typing,
     M-F3 progress, M-F4 preservation).
@@ -83,7 +80,7 @@ Inductive Lit : Type :=
 
 (** ** Op base types
 
-    Mirrors `mez_op::ast::OpType` at the granularity required for
+    Mirrors `crates/op-core/src/ast.rs::OpType` at the granularity required for
     M-F2 / M-F3. [OT_Linear], [OT_Locked] carry the linearity
     structure that [OpExpr] variants manipulate. [OT_Arrow] is the
     shape of lambda types. *)
@@ -103,7 +100,7 @@ Inductive OpType : Type :=
 (** ** Op safety predicates
 
     A small universe of compositional safety predicates mirroring
-    [mez_op::ast::SafetyPredicate]. The mechanization treats them
+    `crates/op-core/src/ast.rs::SafetyPredicate`. The mechanization treats them
     as uninterpreted tags; the intended meaning is resolved at
     type-check time via a predicate interpreter (not mechanized
     here — deferred to M-F4). *)
@@ -120,7 +117,7 @@ Inductive MatchArm : Type :=
 
 (** ** Op expressions
 
-    The 16-variant core mirrors [mez_op::ast::OpExpr]. Each case is
+    The 16-variant core mirrors `crates/op-core/src/ast.rs::OpExpr`. Each case is
     documented with the Rust counterpart. Variants:
 
     - [OE_Literal] : [OpExpr::Literal] — a wrapped literal value.
@@ -128,7 +125,7 @@ Inductive MatchArm : Type :=
     - [OE_Apply]   : [OpExpr::Apply] — function application.
     - [OE_Let]     : [OpExpr::Let] — lexical let-binding.
     - [OE_Lambda]  : [OpExpr::Lambda] — λ-abstraction.
-    - [OE_Sequence] : [OpExpr::Sequence] — sequenced expressions.
+    - [OE_Sequence] : [OpExpr::Seq] — sequenced expressions.
     - [OE_If]      : [OpExpr::If] — conditional.
     - [OE_Match]   : [OpExpr::Match] — polymorphic variant match.
     - [OE_RecordLit] : [OpExpr::RecordLit] — record construction.

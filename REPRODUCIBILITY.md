@@ -150,8 +150,17 @@ CI.
 
 ## Benchmarks
 
-The workspace does not yet expose Criterion benchmarks. Performance claims in
-the paper are not executable from this repository.
+The workspace exposes Criterion benchmarks and a proof-bundle size example:
+
+```
+cargo bench -p op-core --bench op_pipeline
+cargo bench -p op-lex-compiler --bench compile_lex
+cargo run --release -p op-core --example bundle-size
+```
+
+`docs/benchmarks.md` records one empirical snapshot and the exact harness
+commands. Treat benchmark numbers as measurements to be regenerated on the
+reviewer's hardware, not as proof obligations.
 
 ## Hardware and timing
 
@@ -188,6 +197,6 @@ has no network-dependent tests.
 
 ## Issues
 
-If `cargo test --workspace` reports a count other than `86` passed, or if any
+If `cargo test --workspace` reports a count other than `97` passed, or if any
 example deviates from the output above, please open an issue at the repository
 with the full `rustc --version`, `cargo --version`, and platform information.

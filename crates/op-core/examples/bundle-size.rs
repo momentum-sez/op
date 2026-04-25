@@ -41,12 +41,14 @@ fn reduce(e: &OpExpr) -> serde_json::Value {
 fn execute_bundle(program: &OpProgram, host: &NoopHost) -> ProofBundle {
     let mut entries = Vec::new();
     for stmt in &program.body {
-        let Statement::Step(step) = stmt else { continue };
-        let StepBody::Primitive(prim, args) = &step.body else { continue };
-        let reduced: BTreeMap<String, serde_json::Value> = args
-            .iter()
-            .map(|(k, e)| (k.clone(), reduce(e)))
-            .collect();
+        let Statement::Step(step) = stmt else {
+            continue;
+        };
+        let StepBody::Primitive(prim, args) = &step.body else {
+            continue;
+        };
+        let reduced: BTreeMap<String, serde_json::Value> =
+            args.iter().map(|(k, e)| (k.clone(), reduce(e))).collect();
         let call = PrimitiveCall {
             primitive: prim.clone(),
             args: reduced.clone(),
@@ -97,7 +99,10 @@ fn synthesize(n: usize) -> OpProgram {
             body: StepBody::Primitive(
                 Primitive("update.entity_status".to_string()),
                 vec![
-                    ("entity_id".to_string(), OpExpr::String("entity-xyz".to_string())),
+                    (
+                        "entity_id".to_string(),
+                        OpExpr::String("entity-xyz".to_string()),
+                    ),
                     ("status".to_string(), OpExpr::String("ACTIVE".to_string())),
                 ],
             ),

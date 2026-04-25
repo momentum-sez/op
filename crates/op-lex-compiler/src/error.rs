@@ -1,4 +1,4 @@
-//! Typed errors surfaced by the `[[·]] : Lex -> Op` compilation function.
+//! Typed errors surfaced by the `[[.]] : L_adm -> Op` compilation function.
 //!
 //! Two error families cover every rejection path: admissibility violations
 //! (the input Lex term is outside the fragment the compilation function is
@@ -105,5 +105,22 @@ pub enum CompileError {
     UnboundVariable {
         /// The name.
         name: String,
+    },
+
+    /// The emitted Op program failed the target type/effect checker. This is
+    /// a compiler bug or an inadmissible prelude registration, so compilation
+    /// fails closed.
+    #[error("emitted Op program failed typecheck: {errors:?}")]
+    EmittedOpTypecheckFailed {
+        /// Diagnostics returned by `op_core::typecheck_program`.
+        errors: Vec<String>,
+    },
+
+    /// The term was admissible by shape, but inferred expression types do not
+    /// satisfy the callable or match typing rule.
+    #[error("lex expression type mismatch: {detail}")]
+    TypeMismatch {
+        /// Human-readable diagnostic.
+        detail: String,
     },
 }

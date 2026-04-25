@@ -669,6 +669,106 @@ Proof.
   apply HI3 with (s := SideA). exact HvA.
 Qed.
 
+(** ** Finality and abort certificates
+
+    [Verified] is a local durability fact: both signed verdicts are present
+    at a side.  It is not, by itself, the terminal decision.  The SJN/Op BSC
+    obligation requires a durable terminal evidence object.  We model that
+    object here as either a finality certificate containing both sovereign
+    verdicts, or an abort certificate naming the accepted abort reason.  The
+    terminal action is then a pure function of the evidence. *)
+
+Inductive sovereign_verdict : Type :=
+  | VAccept
+  | VReject
+  | VTimeout.
+
+Definition verdict_consents (v : sovereign_verdict) : bool :=
+  match v with
+  | VAccept => true
+  | VReject | VTimeout => false
+  end.
+
+Inductive terminal : Type :=
+  | TCommitted
+  | TAborted.
+
+Record finality_certificate : Type := mk_finality_certificate {
+  fc_idx : idx;
+  fc_verdict_A : sovereign_verdict;
+  fc_verdict_B : sovereign_verdict
+}.
+
+Inductive abort_reason : Type :=
+  | AbortReject : side -> abort_reason
+  | AbortTimeout : side -> abort_reason
+  | AbortMalformedWitness : abort_reason
+  | AbortMissingFinality : abort_reason.
+
+Record abort_certificate : Type := mk_abort_certificate {
+  ac_idx : idx;
+  ac_reason : abort_reason
+}.
+
+Inductive terminal_evidence : Type :=
+  | EvidenceFinality : finality_certificate -> terminal_evidence
+  | EvidenceAbort : abort_certificate -> terminal_evidence.
+
+Definition terminal_of_finality (c : finality_certificate) : terminal :=
+  if verdict_consents (fc_verdict_A c) && verdict_consents (fc_verdict_B c)
+  then TCommitted
+  else TAborted.
+
+Definition terminal_of_evidence (e : terminal_evidence) : terminal :=
+  match e with
+  | EvidenceFinality c => terminal_of_finality c
+  | EvidenceAbort _ => TAborted
+  end.
+
+Definition recovers_to (e : terminal_evidence) (t : terminal) : Prop :=
+  terminal_of_evidence e = t.
+
+Theorem finality_commit_iff_both_accept :
+  forall c,
+    terminal_of_finality c = TCommitted <->
+    fc_verdict_A c = VAccept /\ fc_verdict_B c = VAccept.
+Proof.
+  intros [i va vb]. unfold terminal_of_finality; simpl.
+  destruct va, vb; simpl; split; intro H; try discriminate;
+    try (split; reflexivity);
+    try (destruct H as [Ha Hb]; discriminate).
+Qed.
+
+Theorem terminal_evidence_functional :
+  forall e t1 t2,
+    recovers_to e t1 ->
+    recovers_to e t2 ->
+    t1 = t2.
+Proof.
+  intros e t1 t2 H1 H2.
+  unfold recovers_to in *.
+  rewrite <- H1. exact H2.
+Qed.
+
+Theorem same_finality_certificate_same_terminal :
+  forall c (side1 side2 : side),
+    recovers_to (EvidenceFinality c) (terminal_of_evidence (EvidenceFinality c)) /\
+    recovers_to (EvidenceFinality c) (terminal_of_evidence (EvidenceFinality c)).
+Proof.
+  intros c side1 side2. split; unfold recovers_to; reflexivity.
+Qed.
+
+Theorem abort_certificate_always_aborts :
+  forall a, terminal_of_evidence (EvidenceAbort a) = TAborted.
+Proof. reflexivity. Qed.
+
+Theorem recovery_from_terminal_evidence_is_pure :
+  forall e t1 t2,
+    recovers_to e t1 ->
+    recovers_to e t2 ->
+    t1 = t2.
+Proof. apply terminal_evidence_functional. Qed.
+
 (** ** Verdict uniqueness as equivocation detector
 
     A conflicting same-signer pair of signed artefacts at the same
@@ -701,6 +801,15 @@ Corollary blame_condition_violates_I2 :
 Proof.
   intros s i d1 d2 k H1 H2 Hneq HI2.
   apply Hneq. eapply HI2; eassumption.
+Qed.
+
+Theorem op_blame_pre_violates_I2 :
+  forall z i k,
+    op_blame_pre z i k ->
+    ~ invariant_I2 k.
+Proof.
+  intros z i k [d1 [d2 [H1 [H2 Hneq]]]].
+  intros HI2. apply Hneq. eapply HI2; eassumption.
 Qed.
 
 (** ** Summary

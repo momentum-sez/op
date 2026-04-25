@@ -10,8 +10,9 @@ parsing, typing, effect safety, gas accounting, and deterministic replay.
 
 **The promise.** A program that type-checks composes correctly, accounts
 for its effects, preserves its compensation scope, and lowers
-deterministically to an execution plan. Same program + same inputs + same
-host → same trace on every replay.
+deterministically to an execution plan. Same program bytes + same input bundle
++ same pack digest + same oracle log + same deterministic host primitive
+semantics -> same trace on every replay.
 
 **What it replaces.** Workflow definitions encoded in YAML or JSON carry
 language semantics — step composition through `depends_on` edges, variable
@@ -131,15 +132,22 @@ the interpretation of `EntityRef` (identifier vocabulary), `MoneyAmount`
 optionals, tuples, and a `Result<T, E>` binary. Records are structural; named
 aliases are permitted for readability and public API stability.
 
-**Linear and locked resources.** Two specialized type constructors model
-single-use resources and three-phase-commit locks:
+**Linear and locked resources.** The specified type surface has specialized
+constructors for single-use resources and bilateral commit locks:
 
 - `Linear<T>` — the resource may be consumed at most once. A program that
   consumes a linear resource twice fails to type-check.
-- `Locked<T>` — the resource is in a locked state with exactly two
-  eliminators: `commit_transfer(witness_foreign_minted)` which consumes, and
-  `release_lock(witness_foreign_aborted)` which restores the resource to
-  `Linear<T>`.
+- `Locked<T, omega, epsilon>` — resource `T` is locked under corridor `omega`
+  and epoch `epsilon`. Its intended eliminators are
+  `commit_transfer(witness_foreign_minted)` and
+  `release_lock(witness_foreign_aborted)`.
+- `Signed<T, omega, epsilon>`, `Verified<omega, epsilon>`, and
+  `Blame<omega, epsilon, reason>` record cross-zone evidence and failure
+  witnesses.
+
+The current Rust AST exposes the narrower unindexed `Locked<T>` prototype.
+The indexed constructors describe the target surface that the formal Op-proper
+typing milestone is meant to close.
 
 **Await types.** A waiting step returns `Await<Event, Payload>`. Waiting is
 operationally distinct from completion, and the type system reflects that:
@@ -194,6 +202,11 @@ Tracked effects:
 **Effect rows compose by union.** Certain effect pairs impose ordering
 constraints.
 
+`proof_emit` is silent only after the host has persisted the proof event.
+A failed `attestation.append` is not a tau transition; the enclosing fill
+fails closed. Unknown expression-level primitive calls have no canonical
+effect row and are rejected by the checker rather than treated as pure.
+
 **Safety rule.** A reachable `sovereign_write`, `identity_mutation`, or
 `fiscal_transfer` must be dominated by a `sanctions_check`, with one
 deferred-subject exception: entity creation, where the subject does not
@@ -234,17 +247,19 @@ the shorthand through to the host layer.
 
 ## 6. Compensation
 
-Compensation mirrors the execution semantics of long-running economic
-workflows: it is reverse-topological, step-idempotent, best-effort across
-multiple inverse actions, and persisted after each successful inverse.
+Compensation in the specified semantics is reverse-topological,
+step-idempotent, best-effort across multiple inverse actions, and persisted
+after each successful inverse.
 
 - **Ordering.** Compensation order is reverse-topological on the forward
   DAG.
 - **Locality.** A step's `compensate { ... }` clause attaches to the step it
   inverts. The compiler emits a detached rollback plan when targeting a
   runtime that expects one.
-- **Idempotency.** Every compensation branch must be idempotent with respect
-  to step status and the external side effect it inverts.
+- **Idempotency.** Every compensation branch declares an idempotency contract
+  with respect to step status and the external side effect it inverts. The
+  static surface enforces attachment and scope; extensional inverse
+  correctness is a primitive or host proof obligation.
 - **Best-effort.** When one inverse action fails, the compiler emits the
   plan so that independent inverse actions still run. The failed branch is
   recorded for operator attention.
@@ -271,10 +286,9 @@ requirements.
 `specific(<required>)`.
 
 **Composition law.** A host that composes compliance verdicts across
-participants must do so by the meet operation on its compliance lattice —
-the most restrictive participant's verdict wins. The language enforces that
-the host's composition is honored in the step ordering; it does not
-prescribe the lattice.
+participants must expose a meet operation on its compliance lattice. Op carries
+the participant domains and ordering obligations; the Lex pack or host owns
+the concrete predicate denotations and lattice semantics.
 
 ## 8. Jurisdiction Resolution
 
@@ -330,9 +344,11 @@ policy trade_gate using savm {
 }
 ```
 
-The policy block is a language-level annotation. The host compiles and
-evaluates it through its own proof backend; Op does not prescribe the
-backend.
+The policy block is a language-level annotation unless it is paired with a
+verified proof receipt by the embedding admission envelope. Bare policy blocks
+and bare `AssertSafety` expressions do not discharge safety predicates by
+syntax; the checker fails them closed until a verifier supplies receipt-bearing
+evidence.
 
 ## 11. Host ABI
 
@@ -352,8 +368,9 @@ fn discharge_safety(
 `PrimitiveCall` carries the primitive name, reduced JSON arguments, and
 the ambient jurisdiction. `HostOutcome` is either `Completed(Value)` or
 `Waiting { event, resume_token }`. A deterministic host returns the same
-outcome for the same call on every replay; replay verification depends on
-this property.
+outcome for the same call on every replay. Replay verification depends on this
+property plus the recorded program bytes, input bundle, pack digest, and oracle
+log.
 
 A `NoopHost` ships in the crate for tests and examples — it echoes every
 call as a deterministic JSON record. A production embedding replaces
@@ -426,6 +443,11 @@ type_ref       = scalar_type | "[", type_ref, "]" | type_ref, "?"
                | "{", (ident, ":", type_ref, { ",", ident, ":", type_ref })?, "}"
                | "Result", "<", type_ref, ",", type_ref, ">"
                | "Await", "<", callback_event, ",", type_ref, ">"
+               | "Linear", "<", type_ref, ">"
+               | "Locked", "<", type_ref, ",", ident, ",", ident, ">"
+               | "Signed", "<", type_ref, ",", ident, ",", ident, ">"
+               | "Verified", "<", ident, ",", ident, ">"
+               | "Blame", "<", ident, ",", ident, ",", ident, ">"
                | ident ;
 scalar_type    = "EntityId" | "JurisdictionId" | "MoneyAmount"
                | "ContentDigest" | "StepId" | "CallbackEventType"

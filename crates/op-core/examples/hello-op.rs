@@ -39,8 +39,8 @@
 
 use op_core::host::{HostOutcome, NoopHost, OpHost, PrimitiveCall};
 use op_core::{
-    program_effect_row, typecheck_program, Contracts, Effect, GasBudget, OpExpr, OpProgram,
-    OpStep, OpType, Primitive, ProgramMetadata, Statement, StepBody, StepSignature,
+    program_effect_row, typecheck_program, Contracts, Effect, GasBudget, OpExpr, OpProgram, OpStep,
+    OpType, Primitive, ProgramMetadata, Statement, StepBody, StepSignature,
 };
 use std::collections::BTreeMap;
 
@@ -50,7 +50,10 @@ fn main() {
     //    constructors makes the typing obvious; authoring through JSON is
     //    the integration path a host runtime takes.
     let program = build_program();
-    println!("program      : {}  (jurisdiction: {})", program.name, program.jurisdiction);
+    println!(
+        "program      : {}  (jurisdiction: {})",
+        program.name, program.jurisdiction
+    );
 
     // 2. TYPECHECK. The checker composes effect rows across steps and
     //    enforces the sanctions-dominance rule. Undominated writes are
@@ -81,7 +84,12 @@ fn main() {
                     jurisdiction: program.jurisdiction.clone(),
                 };
                 let outcome = host.invoke(&call).expect("host must succeed");
-                println!("step {:<10}: {} -> {}", step.id, prim.0, summarize(&outcome));
+                println!(
+                    "step {:<10}: {} -> {}",
+                    step.id,
+                    prim.0,
+                    summarize(&outcome)
+                );
                 trace.push((step.id.clone(), outcome));
             }
         }
@@ -91,7 +99,10 @@ fn main() {
     //    satisfied, the gas it billed. A host that emits signed proof
     //    bundles (SAVM, Coq-extracted interpreter, zkVM) stamps the
     //    same shape with an attestation.
-    println!("verdict      : ADMIT  ({} steps executed, trace is replayable)", trace.len());
+    println!(
+        "verdict      : ADMIT  ({} steps executed, trace is replayable)",
+        trace.len()
+    );
 }
 
 // The smallest program that shows the sanctions-dominance rule: a screen
@@ -115,7 +126,10 @@ fn build_program() -> OpProgram {
                 id: "gate".to_string(),
                 body: StepBody::Primitive(
                     Primitive("screening.sanctions".to_string()),
-                    vec![("subject_id".to_string(), OpExpr::String("entity-xyz".to_string()))],
+                    vec![(
+                        "subject_id".to_string(),
+                        OpExpr::String("entity-xyz".to_string()),
+                    )],
                 ),
                 signature: StepSignature {
                     input: OpType::EntityRef,
@@ -132,7 +146,10 @@ fn build_program() -> OpProgram {
                 body: StepBody::Primitive(
                     Primitive("update.entity_status".to_string()),
                     vec![
-                        ("entity_id".to_string(), OpExpr::String("entity-xyz".to_string())),
+                        (
+                            "entity_id".to_string(),
+                            OpExpr::String("entity-xyz".to_string()),
+                        ),
                         ("status".to_string(), OpExpr::String("ACTIVE".to_string())),
                     ],
                 ),

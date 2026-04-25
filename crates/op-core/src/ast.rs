@@ -249,6 +249,7 @@ pub type StepSig = StepSignature;
 // ---------------------------------------------------------------------------
 
 /// A statement in a program body.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Statement {
     /// Typed let binding: `let name: T = value;`.
@@ -593,7 +594,7 @@ pub enum Effect {
 // ---------------------------------------------------------------------------
 
 /// Two-tier gas budget: structural + extensional.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GasBudget {
     /// Static structural gas bound (covers workflow skeleton).
     pub structural_gas: u64,
@@ -601,16 +602,6 @@ pub struct GasBudget {
     pub per_element_gas: u64,
     /// Cardinality certificate (if known at compile time).
     pub cardinality_certificate: Option<CardinalityCertificate>,
-}
-
-impl Default for GasBudget {
-    fn default() -> Self {
-        Self {
-            structural_gas: 0,
-            per_element_gas: 0,
-            cardinality_certificate: None,
-        }
-    }
 }
 
 /// Cardinality certificate `(query, n, asof, signature)` — a host-issued

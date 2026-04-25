@@ -7,7 +7,7 @@ Coq sources backing the formal obligations enumerated in `formal/README.md`.
 - `OpCore.v` — base scaffold: enumeration of Op sort names; a reflexivity
   lemma as a typecheck smoke test.
 - `CompilationSoundness.v` — verdict preservation for the compilation
-  function `[[.]] : Lex -> Op` from the Op paper §6.2, mechanized for
+  function `[[.]] : L_adm -> Op` from the Op paper §6.2, mechanized for
   the scalar shape of the constant compilation case, the
   sanctions-dominance case, the variable case, the record shape of
   the constant case, the list shape of the constant case, the
@@ -60,8 +60,10 @@ scalar-constant principal:
    constant fragment, plus a concrete Op host-call form
    `SOE_Call "sanctions.check" · ` taking a single named argument.
 2. The host primitive `host_sanctions : LexValue -> LexValue`
-   axiomatized with a two-element range
-   (`"Compliant"` or `"SanctionsBlocked"`).
+   supplied as a deterministic parameter. A separate two-valued sanity theorem
+   states the intended range (`"Compliant"` or `"SanctionsBlocked"`) for the
+   sample instantiation; the preservation theorem itself does not validate a
+   concrete sanctions service.
 3. Small-step reductions on both sides threading the principal's
    scalar through the host call before emitting the verdict.
 4. The compilation function `sanct_compile` matching the Rust
@@ -238,22 +240,31 @@ and no warnings.
 
 ## Proof status
 
-9 of 9 cases mechanized. Full §6.3 verdict-preservation complete.
-Zero axioms.
+9 of 9 scalar-skeleton cases mechanized. The §6.3 verdict-preservation
+fragment closes with `Qed.` and zero `Admitted.`
 
-The §6.2 / §6.3 compilation function now closes in full: the scalar
-shape of the constant case, the sanctions-dominance case, the
-variable case, the record shape of the constant case, the list shape
-of the constant case, the variant shape of the constant case, the
-match case, the defeasible case, and the hole-fill case all close
-with `Qed.`.
+The development is parametric, not axiom-free: `host_sanctions`, `prelude`,
+payload types, bundle append behavior, gas interfaces, and hetero-bisimulation
+interfaces are declared as `Parameter` or `Axiom` in the files named by the Op
+paper §8.5.
+
+The §6.2 / §6.3 scalar skeleton now closes for the current nine-case
+Rocq model: the scalar shape of the constant case, the
+sanctions-dominance case, the variable case, the record shape of the
+constant case, the list shape of the constant case, the variant shape
+of the constant case, the match case, the defeasible case, and the
+hole-fill case all close with `Qed.`. This is not yet a full proof over
+the Rust-shaped admissible Lex AST: `PreludeCall` and recursively
+general match/defeasible bodies remain proof obligations for the next
+model.
 
 The hole-fill case mirrors `case_fill.rs` concretely:
 
 1. `FillWitness`, `FillLexTerm`, and `FillOpExpr` model the filled
    hole and the `Seq(attestation.append, value)` Op lowering.
 2. `fill_op_weak_verdict` absorbs the finite `tau` prefix introduced
-   by the attestation append.
+   by a successful attestation append. Failed persistence is rejected by
+   the Rust interpreter and is outside this successful-step relation.
 3. `weak_sim`, `fill_post_stable`, and `fill_bisim` establish the
    weak simulation up to `tau`.
 4. `verdict_preservation_fill` closes the biconditional with `Qed.`,
@@ -264,11 +275,12 @@ The hole-fill case mirrors `case_fill.rs` concretely:
 
 ```
 cd formal/coq
-coqc CompilationSoundness.v
+make
 ```
 
-Exit code zero and no diagnostic output indicates the nine
-mechanized cases are machine-verified by Rocq 9.1.1.
+The tracked wrapper generates `CoqMakefile` from `_CoqProject` when needed and
+then invokes it. Exit code zero indicates the listed mechanized cases are
+machine-verified by Rocq 9.1.1.
 
 ## Relation to the Rust reference
 

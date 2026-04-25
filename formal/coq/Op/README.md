@@ -1,14 +1,12 @@
 # Op/ — F-OP-FORMAL milestone scaffolding
 
-This subdirectory hosts the dedicated Op-language mechanization
-tracked in the kernel repo's
-`docs/architecture/frontier-work/F-OP-FORMAL.md` (Tier 5 of
-SUPREMUM/26).
+This subdirectory hosts the dedicated Op-language mechanisation
+that targets the conservation invariants of `docs/language-spec.md`.
 
 ## Files
 
 - `Syntax.v` — M-F1 deliverable: the abstract syntax of Op as a
-  Rocq inductive type mirroring `mez_op::ast::OpExpr`. Includes
+  Rocq inductive type mirroring `crates/op-core/src/ast.rs::OpExpr`. Includes
   the value predicate `is_value`. No theorems about well-typedness
   or reduction — those live in later milestones.
 - `Semantics.v` — M-F1 companion: small-step relation `step : OpExpr
@@ -19,8 +17,8 @@ SUPREMUM/26).
 
 ## Coverage vs the Rust reference
 
-The M-F1 scaffold covers 16 of the ~24 `OpExpr` variants present
-in `mez_op::ast`. Non-covered variants (`Await`, `AssertSafety`
+The M-F1 scaffold covers the initial `OpExpr` variants modeled from
+`crates/op-core/src/ast.rs`. Non-covered variants (`Await`, `AssertSafety`
 subtypes, the full locked-handle discipline, intercalated safety
 predicates) are deferred to later milestones.
 
@@ -33,7 +31,7 @@ Variants mechanized in `Syntax.v`:
 | `OE_Apply`               | `OpExpr::Apply`                           |
 | `OE_Let`                 | `OpExpr::Let`                             |
 | `OE_Lambda`              | `OpExpr::Lambda`                          |
-| `OE_Sequence`            | `OpExpr::Sequence`                        |
+| `OE_Sequence`            | `OpExpr::Seq`                             |
 | `OE_If`                  | `OpExpr::If`                              |
 | `OE_Match`               | `OpExpr::Match` (shape only; reduction
                              deferred)                                  |
@@ -47,8 +45,6 @@ Variants mechanized in `Syntax.v`:
 | `OE_AssertSafety`        | `OpExpr::AssertSafety`                    |
 
 ## Ratchet discipline
-
-Per `ci/formal_admitted_baseline.json` in the kernel repo:
 
 - Zero `Admitted`.
 - Zero `sorry`-equivalents.
@@ -76,5 +72,6 @@ encoding.
 | M-F4      | `Op/Preservation.v` — preservation theorem |
 | M-F6      | `OpCompiler/Correctness.v` — Lex→Op correctness |
 
-M-F5 (capability structural invariants) lives in the kernel repo
-at `formal/coq/Capability/Invariants.v` — already Qed-closed.
+M-F5 (capability structural invariants) is out-of-tree: capability
+discipline is an embedder-side property over `OpHost` and is mechanised
+in the embedder's own formal tree.

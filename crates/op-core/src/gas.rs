@@ -130,10 +130,7 @@ impl Default for StructuralCostTable {
 }
 
 /// Walk a program body and return a static structural gas bound.
-pub fn estimate_structural_gas(
-    body: &[Statement],
-    table: StructuralCostTable,
-) -> u64 {
+pub fn estimate_structural_gas(body: &[Statement], table: StructuralCostTable) -> u64 {
     let mut total: u64 = 0;
     for stmt in body {
         total = total.saturating_add(statement_cost(stmt, table));
@@ -194,8 +191,8 @@ pub fn extensional_bound(per_element: u64, cert: Option<&CardinalityCertificate>
 mod tests {
     use super::*;
     use crate::ast::{
-        Contracts, Effect, GasBudget, OpExpr, OpProgram, OpStep, OpType, Primitive, ProgramMetadata,
-        StepBody, StepSignature,
+        Contracts, Effect, GasBudget, OpExpr, OpProgram, OpStep, OpType, Primitive,
+        ProgramMetadata, StepBody, StepSignature,
     };
 
     #[test]

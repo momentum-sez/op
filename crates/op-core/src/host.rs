@@ -121,7 +121,12 @@ impl OpHost for NoopHost {
         );
         obj.insert(
             "args".to_string(),
-            serde_json::Value::Object(call.args.iter().map(|(k, v)| (k.clone(), v.clone())).collect()),
+            serde_json::Value::Object(
+                call.args
+                    .iter()
+                    .map(|(k, v)| (k.clone(), v.clone()))
+                    .collect(),
+            ),
         );
         Ok(HostOutcome::Completed(serde_json::Value::Object(obj)))
     }

@@ -1,7 +1,7 @@
 (** * CompilationSoundness.v
 
     Mechanization of verdict preservation for the compilation function
-    [[.]] : Lex -> Op.
+    [[.]] : L_adm -> Op.
 
     Nine cases are mechanized and closed with [Qed.]:
 
@@ -1475,12 +1475,13 @@ Qed.
       [[HoleFill { hole_id, value, witness }]] =
         Seq(attestation.append(witness), [[value]])
 
-    The attestation append is [tau]-labelled: it extends the Op
-    trace but does not itself introduce a verdict. The observable
-    verdict is therefore the verdict of the filler value, reached
-    after a finite silent prefix. The proof below mirrors the Rust
-    [case_fill.rs] shape exactly and closes by weak simulation up to
-    [tau]. *)
+    A successful attestation append is [tau]-labelled: it extends
+    the Op trace but does not itself introduce a verdict. The
+    observable verdict is therefore the verdict of the filler value,
+    reached after a finite silent prefix. Failed persistence is
+    outside this successful-step relation and is rejected by the
+    Rust interpreter. The proof below mirrors the successful
+    [case_fill.rs] shape and closes by weak simulation up to [tau]. *)
 
 Record FillWitness : Type := {
   fill_authority : string;

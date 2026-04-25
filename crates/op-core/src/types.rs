@@ -2,8 +2,8 @@
 //!
 //! The checker is bidirectional: `check(e, T)` synthesizes or checks against
 //! `T`. It tracks linear-resource consumption, rejects double-use, confirms
-//! effect rows compose with the program-level declaration, and discharges
-//! declared safety predicates by passing them to the host at runtime.
+//! effect rows compose with the program-level declaration, and rejects bare
+//! safety predicates that carry no verified receipt.
 //!
 //! This implementation is deliberately compact. It covers the well-formed
 //! shape of a program — bindings, types, steps, branches — and surfaces the
@@ -13,9 +13,9 @@
 //! host's responsibility.
 
 use crate::ast::{
-    Effect, OpExpr, OpProgram, OpType, SafetyPredicate, Statement, StepBody,
+    BinOp, Effect, MatchArm, OpExpr, OpProgram, OpType, SafetyPredicate, Statement, StepBody, UnOp,
 };
-use crate::effects::check_effect_safety;
+use crate::effects::{canonical_effects_for, check_effect_safety, expr_effects};
 use crate::error::OpError;
 use crate::gas::{estimate_structural_gas, StructuralCostTable};
 use serde::{Deserialize, Serialize};
@@ -99,9 +99,7 @@ impl TypeContext {
         }
         let all_consumed = intersection.unwrap_or_default();
         for name in &union {
-            if !all_consumed.contains(name)
-                && !self.branch_asymmetric_consumptions.contains(name)
-            {
+            if !all_consumed.contains(name) && !self.branch_asymmetric_consumptions.contains(name) {
                 self.branch_asymmetric_consumptions.push(name.clone());
             }
         }
@@ -166,6 +164,7 @@ pub fn typecheck_program(program: &OpProgram) -> TypeCheckResult {
     let mut errors: Vec<String> = Vec::new();
     let mut discharged: Vec<SafetyPredicate> = Vec::new();
     let mut deferred: Vec<SafetyPredicate> = Vec::new();
+    let mut failed: Vec<SafetyPredicateFailure> = Vec::new();
 
     // Seed context with inputs.
     for (name, ty) in &program.inputs {
@@ -177,7 +176,23 @@ pub fn typecheck_program(program: &OpProgram) -> TypeCheckResult {
         ctx.bind(p.name.clone(), OpType::EntityRef);
     }
 
-    check_block(&program.body, &mut ctx, &mut errors, &mut discharged, &mut deferred);
+    let expected_output = program_output_type(&program.outputs);
+    check_block(
+        &program.body,
+        &mut ctx,
+        &mut errors,
+        &mut discharged,
+        &mut deferred,
+        &mut failed,
+        expected_output.as_ref(),
+    );
+    if let Some(expected) = &expected_output {
+        if expected != &OpType::Unit && !block_contains_return(&program.body) {
+            errors.push(format!(
+                "program declares output {expected:?} but contains no return"
+            ));
+        }
+    }
 
     // Effect safety.
     if let Err(effect_errors) = check_effect_safety(program) {
@@ -186,12 +201,35 @@ pub fn typecheck_program(program: &OpProgram) -> TypeCheckResult {
         }
     }
 
+    let inferred_effects = program_effect_row(program);
+    let declared_effects: BTreeSet<Effect> = program
+        .effects
+        .iter()
+        .filter(|e| !matches!(e, Effect::Pure))
+        .cloned()
+        .collect();
+    let missing_effects: Vec<Effect> = inferred_effects
+        .iter()
+        .filter(|e| !matches!(e, Effect::Pure) && !declared_effects.contains(*e))
+        .cloned()
+        .collect();
+    if !missing_effects.is_empty() {
+        errors.push(format!(
+            "program effect declaration missing inferred effects: {missing_effects:?}"
+        ));
+    }
+
     let gas_bound = estimate_structural_gas(&program.body, StructuralCostTable::default());
     let extensional_bound = program
         .gas_budget
         .cardinality_certificate
         .as_ref()
-        .map(|c| program.gas_budget.per_element_gas.saturating_mul(c.cardinality));
+        .map(|c| {
+            program
+                .gas_budget
+                .per_element_gas
+                .saturating_mul(c.cardinality)
+        });
 
     // Deterministic diagnostic order: a BTreeSet sorts names lexicographically
     // so replay runs emit the violations list in stable sequence. This backs
@@ -207,7 +245,7 @@ pub fn typecheck_program(program: &OpProgram) -> TypeCheckResult {
         inferred_type: Some(serde_json::to_string(&program.outputs).unwrap_or_default()),
         discharged_predicates: discharged,
         deferred_predicates: deferred,
-        failed_predicates: vec![],
+        failed_predicates: failed,
         linearity_violations: linearity_sorted.into_iter().collect(),
         gas_analysis: Some(GasAnalysis {
             structural_bound: gas_bound,
@@ -219,15 +257,59 @@ pub fn typecheck_program(program: &OpProgram) -> TypeCheckResult {
     }
 }
 
+fn program_output_type(outputs: &[(String, OpType)]) -> Option<OpType> {
+    match outputs {
+        [] => None,
+        [(_, ty)] => Some(ty.clone()),
+        fields => Some(OpType::Record(fields.to_vec())),
+    }
+}
+
+fn block_contains_return(stmts: &[Statement]) -> bool {
+    stmts.iter().any(statement_contains_return)
+}
+
+fn statement_contains_return(stmt: &Statement) -> bool {
+    match stmt {
+        Statement::Return(_) => true,
+        Statement::Choose { arms, else_block } => {
+            arms.iter().any(|(_, body)| block_contains_return(body))
+                || else_block
+                    .as_ref()
+                    .is_some_and(|body| block_contains_return(body))
+        }
+        Statement::In { body, .. } => block_contains_return(body),
+        Statement::Step(step) => match &step.body {
+            StepBody::Block(inner) => block_contains_return(inner),
+            StepBody::Primitive(_, _) => false,
+        },
+        _ => false,
+    }
+}
+
+fn initializer_compatible(annotation: &OpType, actual: &OpType) -> bool {
+    annotation == actual || matches!(annotation, OpType::Linear(inner) if inner.as_ref() == actual)
+}
+
 fn check_block(
     stmts: &[Statement],
     ctx: &mut TypeContext,
     errors: &mut Vec<String>,
     discharged: &mut Vec<SafetyPredicate>,
     deferred: &mut Vec<SafetyPredicate>,
+    failed: &mut Vec<SafetyPredicateFailure>,
+    expected_return: Option<&OpType>,
 ) {
     for stmt in stmts {
-        check_statement(stmt, ctx, errors, discharged, deferred);
+        check_statement(
+            stmt,
+            ctx,
+            errors,
+            discharged,
+            deferred,
+            failed,
+            expected_return,
+        );
     }
 }
 
@@ -237,18 +319,23 @@ fn check_statement(
     errors: &mut Vec<String>,
     discharged: &mut Vec<SafetyPredicate>,
     deferred: &mut Vec<SafetyPredicate>,
+    failed: &mut Vec<SafetyPredicateFailure>,
+    expected_return: Option<&OpType>,
 ) {
     match stmt {
         Statement::Let { name, ty, value } => {
-            if let Err(e) = check_expr(value, ctx) {
-                errors.push(format!("in let {name}: {e}"));
+            check_expression_site(value, ctx, errors, failed, &format!("in let {name}"));
+            match static_expr_type(value, ctx) {
+                Ok(actual) if initializer_compatible(ty, &actual) => {}
+                Ok(actual) => errors.push(format!(
+                    "let `{name}` initializer type {actual:?} does not match annotation {ty:?}"
+                )),
+                Err(err) => errors.push(format!("in let {name} type inference: {err}")),
             }
             ctx.bind(name.clone(), ty.clone());
         }
         Statement::Run { name, call } => {
-            if let Err(e) = check_expr(call, ctx) {
-                errors.push(format!("in run {name}: {e}"));
-            }
+            check_expression_site(call, ctx, errors, failed, &format!("in run {name}"));
             // The shape of a primitive call's return type is
             // host-determined; we bind to a record placeholder.
             ctx.bind(name.clone(), OpType::Record(vec![]));
@@ -257,26 +344,56 @@ fn check_statement(
             match &step.body {
                 StepBody::Primitive(_, args) => {
                     for (_, arg) in args {
-                        if let Err(e) = check_expr(arg, ctx) {
-                            errors.push(format!("in step {}: {e}", step.id));
-                        }
+                        check_expression_site(
+                            arg,
+                            ctx,
+                            errors,
+                            failed,
+                            &format!("in step {}", step.id),
+                        );
                     }
                 }
                 StepBody::Block(inner) => {
                     let mut inner_ctx = ctx.clone();
-                    check_block(inner, &mut inner_ctx, errors, discharged, deferred);
+                    check_block(
+                        inner,
+                        &mut inner_ctx,
+                        errors,
+                        discharged,
+                        deferred,
+                        failed,
+                        Some(&step.signature.output),
+                    );
+                    if step.signature.output != OpType::Unit && !block_contains_return(inner) {
+                        errors.push(format!(
+                            "step `{}` declares output {:?} but block body contains no return",
+                            step.id, step.signature.output
+                        ));
+                    }
                 }
             }
             if let Some(comp) = &step.compensate {
                 if let StepBody::Block(inner) = &comp.body {
                     let mut inner_ctx = ctx.clone();
-                    check_block(inner, &mut inner_ctx, errors, discharged, deferred);
+                    check_block(
+                        inner,
+                        &mut inner_ctx,
+                        errors,
+                        discharged,
+                        deferred,
+                        failed,
+                        Some(&OpType::Unit),
+                    );
                 }
                 if let StepBody::Primitive(_, args) = &comp.body {
                     for (_, arg) in args {
-                        if let Err(e) = check_expr(arg, ctx) {
-                            errors.push(format!("in compensate of step {}: {e}", step.id));
-                        }
+                        check_expression_site(
+                            arg,
+                            ctx,
+                            errors,
+                            failed,
+                            &format!("in compensate of step {}", step.id),
+                        );
                     }
                 }
             }
@@ -297,9 +414,13 @@ fn check_statement(
             let mut branch_ctxs: Vec<TypeContext> = Vec::new();
             for (name, e) in branches {
                 let mut sub = ctx.clone();
-                if let Err(err) = check_expr(e, &mut sub) {
-                    errors.push(format!("in par branch {name}: {err}"));
-                }
+                check_expression_site(
+                    e,
+                    &mut sub,
+                    errors,
+                    failed,
+                    &format!("in par branch {name}"),
+                );
                 branch_ctxs.push(sub);
                 ctx.bind(name.clone(), OpType::Record(vec![]));
             }
@@ -308,44 +429,86 @@ fn check_statement(
         Statement::Choose { arms, else_block } => {
             let mut branch_ctxs: Vec<TypeContext> = Vec::new();
             for (guard, block) in arms {
-                if let Err(e) = check_expr(guard, ctx) {
-                    errors.push(format!("in choose guard: {e}"));
-                }
+                check_expression_site(guard, ctx, errors, failed, "in choose guard");
                 let mut sub = ctx.clone();
-                check_block(block, &mut sub, errors, discharged, deferred);
+                check_block(
+                    block,
+                    &mut sub,
+                    errors,
+                    discharged,
+                    deferred,
+                    failed,
+                    expected_return,
+                );
                 branch_ctxs.push(sub);
             }
             if let Some(else_body) = else_block {
                 let mut sub = ctx.clone();
-                check_block(else_body, &mut sub, errors, discharged, deferred);
+                check_block(
+                    else_body,
+                    &mut sub,
+                    errors,
+                    discharged,
+                    deferred,
+                    failed,
+                    expected_return,
+                );
                 branch_ctxs.push(sub);
             }
             ctx.reconcile_branches(&branch_ctxs);
         }
         Statement::In { body, .. } => {
-            check_block(body, ctx, errors, discharged, deferred);
+            check_block(
+                body,
+                ctx,
+                errors,
+                discharged,
+                deferred,
+                failed,
+                expected_return,
+            );
         }
-        Statement::Policy { .. } => {
-            // Policy blocks defer to host-side SAVM / proof backend.
+        Statement::Policy { name, domains } => {
+            errors.push(format!(
+                "policy block `{name}` over domains {domains:?} requires a verified proof receipt"
+            ));
         }
-        Statement::Return(e) | Statement::Expr(e) => {
-            if let Err(err) = check_expr(e, ctx) {
-                errors.push(err);
+        Statement::Return(e) => {
+            check_expression_site(e, ctx, errors, failed, "in expression");
+            if let Some(expected) = expected_return {
+                match static_expr_type(e, ctx) {
+                    Ok(actual) if &actual == expected => {}
+                    Ok(actual) => errors.push(format!(
+                        "return type {actual:?} does not match declared output {expected:?}"
+                    )),
+                    Err(err) => errors.push(format!("in return type inference: {err}")),
+                }
             }
-            if let OpExpr::AssertSafety(pred) = e {
-                discharged.push(pred.clone());
-            }
+        }
+        Statement::Expr(e) => {
+            check_expression_site(e, ctx, errors, failed, "in expression");
         }
     }
 }
 
+fn check_expression_site(
+    expr: &OpExpr,
+    ctx: &mut TypeContext,
+    errors: &mut Vec<String>,
+    failed: &mut Vec<SafetyPredicateFailure>,
+    site: &str,
+) {
+    if let Err(e) = check_expr(expr, ctx) {
+        errors.push(format!("{site}: {e}"));
+    }
+    record_safety_assertions(expr, failed, errors, site);
+}
+
 fn check_expr(expr: &OpExpr, ctx: &mut TypeContext) -> Result<(), String> {
     match expr {
-        OpExpr::Unit
-        | OpExpr::Bool(_)
-        | OpExpr::Int(_)
-        | OpExpr::String(_)
-        | OpExpr::Null => Ok(()),
+        OpExpr::Unit | OpExpr::Bool(_) | OpExpr::Int(_) | OpExpr::String(_) | OpExpr::Null => {
+            Ok(())
+        }
         OpExpr::Var(name) => {
             if ctx.lookup(name).is_some() {
                 if ctx.consumed_linears.contains(name) {
@@ -379,7 +542,13 @@ fn check_expr(expr: &OpExpr, ctx: &mut TypeContext) -> Result<(), String> {
         }
         OpExpr::BinOp(_, a, b) | OpExpr::Coalesce(a, b) => {
             check_expr(a, ctx)?;
-            check_expr(b, ctx)
+            check_expr(b, ctx)?;
+            if let OpExpr::BinOp(op, _, _) = expr {
+                let left = static_expr_type(a, ctx)?;
+                let right = static_expr_type(b, ctx)?;
+                check_binop_types(*op, &left, &right)?;
+            }
+            Ok(())
         }
         OpExpr::Seq(a, b) => {
             // Seq evaluates `a` for its effect, returns `b`'s value.
@@ -387,7 +556,15 @@ fn check_expr(expr: &OpExpr, ctx: &mut TypeContext) -> Result<(), String> {
             check_expr(a, ctx)?;
             check_expr(b, ctx)
         }
-        OpExpr::UnOp(_, a) => check_expr(a, ctx),
+        OpExpr::UnOp(op, a) => {
+            check_expr(a, ctx)?;
+            let ty = static_expr_type(a, ctx)?;
+            match op {
+                UnOp::Not if ty == OpType::Bool => Ok(()),
+                UnOp::Neg if ty == OpType::Int => Ok(()),
+                _ => Err(format!("{op:?} operand has incompatible type {ty:?}")),
+            }
+        }
         OpExpr::Await { .. } => Ok(()),
         OpExpr::Match {
             scrutinee,
@@ -395,12 +572,40 @@ fn check_expr(expr: &OpExpr, ctx: &mut TypeContext) -> Result<(), String> {
             catch_all,
         } => {
             check_expr(scrutinee, ctx)?;
+            let scrutinee_ty = static_expr_type(scrutinee, ctx)?;
+            validate_match_patterns(&scrutinee_ty, arms)?;
+            let mut result_ty: Option<OpType> = None;
             for arm in arms {
                 let mut sub = ctx.clone();
-                sub.bind(arm.binding.clone(), OpType::Unit);
+                if !arm.binding.is_empty() && arm.binding != "_" {
+                    sub.bind(
+                        arm.binding.clone(),
+                        match_binding_type(&scrutinee_ty, &arm.pattern)?,
+                    );
+                }
                 check_expr(&arm.body, &mut sub)?;
+                let arm_ty = static_expr_type(&arm.body, &sub)?;
+                if let Some(expected) = &result_ty {
+                    if expected != &arm_ty {
+                        return Err(format!(
+                            "match arm `{}` has type {:?}, expected {:?}",
+                            arm.pattern, arm_ty, expected
+                        ));
+                    }
+                } else {
+                    result_ty = Some(arm_ty);
+                }
             }
-            check_expr(catch_all, ctx)
+            check_expr(catch_all, ctx)?;
+            let catch_ty = static_expr_type(catch_all, ctx)?;
+            if let Some(expected) = &result_ty {
+                if expected != &catch_ty {
+                    return Err(format!(
+                        "match catch-all has type {catch_ty:?}, expected {expected:?}"
+                    ));
+                }
+            }
+            Ok(())
         }
         OpExpr::AssertSafety(_) => Ok(()),
         OpExpr::ConsumeLinear(inner) => {
@@ -466,7 +671,328 @@ fn check_expr(expr: &OpExpr, ctx: &mut TypeContext) -> Result<(), String> {
     }
 }
 
-/// Effect-row composition: compute the union of effects declared at each step.
+fn check_binop_types(op: BinOp, left: &OpType, right: &OpType) -> Result<(), String> {
+    match op {
+        BinOp::And | BinOp::Or => require_operands(op, left, right, &OpType::Bool),
+        BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge | BinOp::Add | BinOp::Sub | BinOp::Mul => {
+            require_operands(op, left, right, &OpType::Int)
+        }
+        BinOp::Eq | BinOp::Ne => {
+            if left == right {
+                Ok(())
+            } else {
+                Err(format!(
+                    "{op:?} operands must have the same type, got {left:?} and {right:?}"
+                ))
+            }
+        }
+        BinOp::In => match right {
+            OpType::List(inner) if inner.as_ref() == left => Ok(()),
+            _ => Err(format!(
+                "In expects right operand List<{left:?}>, got {right:?}"
+            )),
+        },
+        BinOp::Contains => match left {
+            OpType::List(inner) if inner.as_ref() == right => Ok(()),
+            OpType::String if matches!(right, OpType::String) => Ok(()),
+            _ => Err(format!(
+                "Contains expects List<T>, T or String, String, got {left:?} and {right:?}"
+            )),
+        },
+    }
+}
+
+fn require_operands(
+    op: BinOp,
+    left: &OpType,
+    right: &OpType,
+    expected: &OpType,
+) -> Result<(), String> {
+    if left == expected && right == expected {
+        Ok(())
+    } else {
+        Err(format!(
+            "{op:?} operands must both be {expected:?}, got {left:?} and {right:?}"
+        ))
+    }
+}
+
+fn op_verdict_variant() -> OpType {
+    OpType::Variant(vec![
+        ("Compliant".to_string(), OpType::Unit),
+        (
+            "NonCompliant".to_string(),
+            OpType::Record(vec![("reason".to_string(), OpType::String)]),
+        ),
+        ("SanctionsBlocked".to_string(), OpType::Unit),
+    ])
+}
+
+fn static_expr_type(expr: &OpExpr, ctx: &TypeContext) -> Result<OpType, String> {
+    match expr {
+        OpExpr::Unit => Ok(OpType::Unit),
+        OpExpr::Bool(_) => Ok(OpType::Bool),
+        OpExpr::Int(_) => Ok(OpType::Int),
+        OpExpr::String(_) => Ok(OpType::String),
+        OpExpr::Null => Ok(OpType::Option(Box::new(OpType::Unit))),
+        OpExpr::Var(name) => ctx
+            .lookup(name)
+            .cloned()
+            .ok_or_else(|| format!("unbound variable: {name}")),
+        OpExpr::Field(base, field) => match static_expr_type(base, ctx)? {
+            OpType::Record(fields) => fields
+                .into_iter()
+                .find_map(|(name, ty)| (name == *field).then_some(ty))
+                .ok_or_else(|| format!("unknown record field: {field}")),
+            other => Err(format!("field access on non-record type: {other:?}")),
+        },
+        OpExpr::Record(fields) => fields
+            .iter()
+            .map(|(name, value)| Ok((name.clone(), static_expr_type(value, ctx)?)))
+            .collect::<Result<Vec<_>, _>>()
+            .map(|field_types| {
+                if is_encoded_variant_record(fields) {
+                    OpType::Variant(vec![])
+                } else {
+                    OpType::Record(field_types)
+                }
+            }),
+        OpExpr::List(items) => {
+            let mut item_ty: Option<OpType> = None;
+            for item in items {
+                let ty = static_expr_type(item, ctx)?;
+                if let Some(expected) = &item_ty {
+                    if expected != &ty {
+                        return Err(format!(
+                            "list item type mismatch: expected {expected:?}, got {ty:?}"
+                        ));
+                    }
+                } else {
+                    item_ty = Some(ty);
+                }
+            }
+            Ok(OpType::List(Box::new(item_ty.unwrap_or(OpType::Unit))))
+        }
+        OpExpr::Tuple(items) => items
+            .iter()
+            .map(|item| static_expr_type(item, ctx))
+            .collect::<Result<Vec<_>, _>>()
+            .map(OpType::Tuple),
+        OpExpr::Call(name, _) => Ok(match name.as_str() {
+            "sanctions.check" => op_verdict_variant(),
+            "attestation.append" => OpType::Record(vec![]),
+            _ => OpType::Record(vec![]),
+        }),
+        OpExpr::BinOp(op, left, right) => {
+            let left_ty = static_expr_type(left, ctx)?;
+            let right_ty = static_expr_type(right, ctx)?;
+            check_binop_types(*op, &left_ty, &right_ty)?;
+            Ok(match op {
+                BinOp::Eq
+                | BinOp::Ne
+                | BinOp::Lt
+                | BinOp::Le
+                | BinOp::Gt
+                | BinOp::Ge
+                | BinOp::And
+                | BinOp::Or
+                | BinOp::In
+                | BinOp::Contains => OpType::Bool,
+                BinOp::Add | BinOp::Sub | BinOp::Mul => OpType::Int,
+            })
+        }
+        OpExpr::UnOp(op, inner) => {
+            let inner_ty = static_expr_type(inner, ctx)?;
+            match op {
+                UnOp::Not if inner_ty == OpType::Bool => Ok(OpType::Bool),
+                UnOp::Neg if inner_ty == OpType::Int => Ok(OpType::Int),
+                _ => Err(format!("{op:?} operand has incompatible type {inner_ty:?}")),
+            }
+        }
+        OpExpr::Coalesce(left, _right) => static_expr_type(left, ctx),
+        OpExpr::Seq(_left, right) => static_expr_type(right, ctx),
+        OpExpr::Await { event, .. } => Ok(OpType::Await {
+            event: event.clone(),
+            payload: Box::new(OpType::Record(vec![])),
+        }),
+        OpExpr::Match {
+            scrutinee,
+            arms,
+            catch_all,
+        } => {
+            let scrutinee_ty = static_expr_type(scrutinee, ctx)?;
+            validate_match_patterns(&scrutinee_ty, arms)?;
+            let mut result_ty: Option<OpType> = None;
+            for arm in arms {
+                let mut sub = ctx.clone();
+                if !arm.binding.is_empty() && arm.binding != "_" {
+                    sub.bind(
+                        arm.binding.clone(),
+                        match_binding_type(&scrutinee_ty, &arm.pattern)?,
+                    );
+                }
+                let ty = static_expr_type(&arm.body, &sub)?;
+                if let Some(expected) = &result_ty {
+                    if expected != &ty {
+                        return Err(format!(
+                            "match arm `{}` has type {:?}, expected {:?}",
+                            arm.pattern, ty, expected
+                        ));
+                    }
+                } else {
+                    result_ty = Some(ty);
+                }
+            }
+            let catch_ty = static_expr_type(catch_all, ctx)?;
+            if let Some(expected) = &result_ty {
+                if expected != &catch_ty {
+                    return Err(format!(
+                        "match catch-all has type {catch_ty:?}, expected {expected:?}"
+                    ));
+                }
+                Ok(expected.clone())
+            } else {
+                Ok(catch_ty)
+            }
+        }
+        OpExpr::AssertSafety(_) => Ok(OpType::Unit),
+        OpExpr::ConsumeLinear(inner) => static_expr_type(inner, ctx),
+        OpExpr::Lock { resource, .. } => {
+            Ok(OpType::Locked(Box::new(static_expr_type(resource, ctx)?)))
+        }
+        OpExpr::CommitTransfer { locked, .. } | OpExpr::ReleaseLock { locked, .. } => {
+            static_expr_type(locked, ctx)
+        }
+    }
+}
+
+fn is_encoded_variant_record(fields: &[(String, OpExpr)]) -> bool {
+    matches!(
+        fields,
+        [
+            (tag_name, OpExpr::String(_)),
+            (value_name, _)
+        ] if tag_name == "tag" && value_name == "value"
+    )
+}
+
+fn match_binding_type(scrutinee_ty: &OpType, pattern: &str) -> Result<OpType, String> {
+    match scrutinee_ty {
+        OpType::Bool => match pattern {
+            "true" | "false" => Ok(OpType::Unit),
+            other => Err(format!("unknown Bool match pattern `{other}`")),
+        },
+        OpType::Variant(constructors) if constructors.is_empty() => Ok(OpType::Record(vec![])),
+        OpType::Variant(constructors) => constructors
+            .iter()
+            .find_map(|(name, ty)| (name == pattern).then_some(ty.clone()))
+            .ok_or_else(|| format!("unknown variant match pattern `{pattern}`")),
+        other => Err(format!(
+            "match scrutinee must be Bool or Variant, got {other:?}"
+        )),
+    }
+}
+
+fn validate_match_patterns(scrutinee_ty: &OpType, arms: &[MatchArm]) -> Result<(), String> {
+    if !matches!(scrutinee_ty, OpType::Bool | OpType::Variant(_)) {
+        return Err(format!(
+            "match scrutinee must be Bool or Variant, got {scrutinee_ty:?}"
+        ));
+    }
+
+    let mut seen = BTreeSet::new();
+    for arm in arms {
+        if !seen.insert(arm.pattern.clone()) {
+            return Err(format!("duplicate match arm `{}`", arm.pattern));
+        }
+        match_binding_type(scrutinee_ty, &arm.pattern)?;
+    }
+
+    let expected: Option<Vec<String>> = match scrutinee_ty {
+        OpType::Bool => Some(vec!["true".to_string(), "false".to_string()]),
+        OpType::Variant(constructors) if !constructors.is_empty() => {
+            Some(constructors.iter().map(|(name, _)| name.clone()).collect())
+        }
+        _ => None,
+    };
+    if let Some(expected) = expected {
+        for name in expected {
+            if !seen.contains(&name) {
+                return Err(format!("match is missing constructor arm `{name}`"));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn record_safety_assertions(
+    expr: &OpExpr,
+    failed: &mut Vec<SafetyPredicateFailure>,
+    errors: &mut Vec<String>,
+    site: &str,
+) {
+    match expr {
+        OpExpr::AssertSafety(predicate) => {
+            failed.push(SafetyPredicateFailure {
+                predicate: predicate.clone(),
+                reason: "bare AssertSafety carries no verified receipt".to_string(),
+            });
+            errors.push(format!(
+                "{site}: safety predicate {predicate:?} requires a verified receipt"
+            ));
+        }
+        OpExpr::Field(base, _) | OpExpr::UnOp(_, base) | OpExpr::ConsumeLinear(base) => {
+            record_safety_assertions(base, failed, errors, site);
+        }
+        OpExpr::Record(fields) => {
+            for (_, value) in fields {
+                record_safety_assertions(value, failed, errors, site);
+            }
+        }
+        OpExpr::List(items) | OpExpr::Tuple(items) => {
+            for item in items {
+                record_safety_assertions(item, failed, errors, site);
+            }
+        }
+        OpExpr::Call(_, args) => {
+            for (_, arg) in args {
+                record_safety_assertions(arg, failed, errors, site);
+            }
+        }
+        OpExpr::BinOp(_, left, right)
+        | OpExpr::Coalesce(left, right)
+        | OpExpr::Seq(left, right) => {
+            record_safety_assertions(left, failed, errors, site);
+            record_safety_assertions(right, failed, errors, site);
+        }
+        OpExpr::Match {
+            scrutinee,
+            arms,
+            catch_all,
+        } => {
+            record_safety_assertions(scrutinee, failed, errors, site);
+            for arm in arms {
+                record_safety_assertions(&arm.body, failed, errors, site);
+            }
+            record_safety_assertions(catch_all, failed, errors, site);
+        }
+        OpExpr::Lock { resource, .. } => record_safety_assertions(resource, failed, errors, site),
+        OpExpr::CommitTransfer { locked, witness } | OpExpr::ReleaseLock { locked, witness } => {
+            record_safety_assertions(locked, failed, errors, site);
+            record_safety_assertions(witness, failed, errors, site);
+        }
+        OpExpr::Unit
+        | OpExpr::Bool(_)
+        | OpExpr::Int(_)
+        | OpExpr::String(_)
+        | OpExpr::Null
+        | OpExpr::Var(_)
+        | OpExpr::Await { .. } => {}
+    }
+}
+
+/// Effect-row composition: compute the union of effects reachable from the
+/// program body.
 pub fn program_effect_row(program: &OpProgram) -> Vec<Effect> {
     let mut seen: Vec<Effect> = Vec::new();
     walk_for_effects(&program.body, &mut seen);
@@ -482,13 +1008,23 @@ fn walk_for_effects(stmts: &[Statement], acc: &mut Vec<Effect>) {
                 for e in &step.signature.effects {
                     acc.push(e.clone());
                 }
-                if let StepBody::Block(inner) = &step.body {
-                    walk_for_effects(inner, acc);
+                walk_step_body_for_effects(&step.body, acc);
+                if let Some(comp) = &step.compensate {
+                    walk_step_body_for_effects(&comp.body, acc);
                 }
             }
-            Statement::Par { branches: _ } => {}
+            Statement::Let { value, .. } | Statement::Return(value) | Statement::Expr(value) => {
+                push_expr_effects(value, acc)
+            }
+            Statement::Run { call, .. } => push_expr_effects(call, acc),
+            Statement::Par { branches } => {
+                for (_name, expr) in branches {
+                    push_expr_effects(expr, acc);
+                }
+            }
             Statement::Choose { arms, else_block } => {
-                for (_g, b) in arms {
+                for (g, b) in arms {
+                    push_expr_effects(g, acc);
                     walk_for_effects(b, acc);
                 }
                 if let Some(e) = else_block {
@@ -496,8 +1032,28 @@ fn walk_for_effects(stmts: &[Statement], acc: &mut Vec<Effect>) {
                 }
             }
             Statement::In { body, .. } => walk_for_effects(body, acc),
-            _ => {}
+            Statement::Policy { .. } => {}
         }
+    }
+}
+
+fn walk_step_body_for_effects(body: &StepBody, acc: &mut Vec<Effect>) {
+    match body {
+        StepBody::Primitive(prim, args) => {
+            for e in canonical_effects_for(&prim.0) {
+                acc.push(e);
+            }
+            for (_name, expr) in args {
+                push_expr_effects(expr, acc);
+            }
+        }
+        StepBody::Block(inner) => walk_for_effects(inner, acc),
+    }
+}
+
+fn push_expr_effects(expr: &OpExpr, acc: &mut Vec<Effect>) {
+    for e in expr_effects(expr).iter() {
+        acc.push(e.clone());
     }
 }
 
@@ -550,12 +1106,159 @@ mod tests {
     }
 
     #[test]
-    fn assert_safety_is_recorded_as_discharged() {
+    fn bare_assert_safety_fails_without_receipt() {
         let res = typecheck_program(&trivial_program(vec![Statement::Return(
             OpExpr::AssertSafety(SafetyPredicate::NoGroupFormationBypass),
         )]));
-        assert!(res.success);
-        assert_eq!(res.discharged_predicates.len(), 1);
+        assert!(!res.success);
+        assert!(res.discharged_predicates.is_empty());
+        assert_eq!(res.failed_predicates.len(), 1);
+        assert!(res
+            .errors
+            .iter()
+            .any(|e| e.contains("requires a verified receipt")));
+    }
+
+    #[test]
+    fn binop_operand_types_are_checked() {
+        let res = typecheck_program(&trivial_program(vec![Statement::Return(OpExpr::BinOp(
+            BinOp::And,
+            Box::new(OpExpr::Int(1)),
+            Box::new(OpExpr::Int(2)),
+        ))]));
+        assert!(!res.success);
+        assert!(res
+            .errors
+            .iter()
+            .any(|e| e.contains("And operands must both be Bool")));
+    }
+
+    #[test]
+    fn match_arm_result_types_must_agree() {
+        let res = typecheck_program(&trivial_program(vec![Statement::Return(OpExpr::Match {
+            scrutinee: Box::new(OpExpr::Bool(true)),
+            arms: vec![
+                MatchArm {
+                    pattern: "true".to_string(),
+                    binding: "_".to_string(),
+                    body: OpExpr::Int(1),
+                },
+                MatchArm {
+                    pattern: "false".to_string(),
+                    binding: "_".to_string(),
+                    body: OpExpr::Bool(false),
+                },
+            ],
+            catch_all: Box::new(OpExpr::Int(0)),
+        })]));
+        assert!(!res.success);
+        assert!(res
+            .errors
+            .iter()
+            .any(|e| e.contains("match arm `false` has type Bool")));
+    }
+
+    #[test]
+    fn declared_program_return_type_is_checked() {
+        let mut prog = trivial_program(vec![Statement::Return(OpExpr::Bool(true))]);
+        prog.outputs = vec![("accepted".to_string(), OpType::Bool)];
+        let res = typecheck_program(&prog);
+        assert!(
+            res.success,
+            "Bool return should satisfy Bool output: {:?}",
+            res.errors
+        );
+
+        prog.body = vec![Statement::Return(OpExpr::Int(1))];
+        let res = typecheck_program(&prog);
+        assert!(!res.success);
+        assert!(res
+            .errors
+            .iter()
+            .any(|e| e.contains("return type Int does not match declared output Bool")));
+    }
+
+    #[test]
+    fn let_initializer_must_match_annotation() {
+        let res = typecheck_program(&trivial_program(vec![Statement::Let {
+            name: "x".to_string(),
+            ty: OpType::Bool,
+            value: OpExpr::Int(1),
+        }]));
+        assert!(!res.success);
+        assert!(res
+            .errors
+            .iter()
+            .any(|e| e.contains("let `x` initializer type Int does not match annotation Bool")));
+    }
+
+    #[test]
+    fn declared_non_unit_output_requires_return() {
+        let mut prog = trivial_program(vec![Statement::Expr(OpExpr::Unit)]);
+        prog.outputs = vec![("result".to_string(), OpType::Bool)];
+        let res = typecheck_program(&prog);
+        assert!(!res.success);
+        assert!(res
+            .errors
+            .iter()
+            .any(|e| e.contains("program declares output Bool but contains no return")));
+    }
+
+    #[test]
+    fn match_catch_all_type_must_agree_with_arms() {
+        let res = typecheck_program(&trivial_program(vec![Statement::Return(OpExpr::Match {
+            scrutinee: Box::new(OpExpr::Bool(true)),
+            arms: vec![
+                MatchArm {
+                    pattern: "true".to_string(),
+                    binding: "_".to_string(),
+                    body: OpExpr::Int(1),
+                },
+                MatchArm {
+                    pattern: "false".to_string(),
+                    binding: "_".to_string(),
+                    body: OpExpr::Int(0),
+                },
+            ],
+            catch_all: Box::new(OpExpr::Bool(false)),
+        })]));
+        assert!(!res.success);
+        assert!(res
+            .errors
+            .iter()
+            .any(|e| e.contains("match catch-all has type Bool, expected Int")));
+    }
+
+    #[test]
+    fn match_scrutinee_must_be_bool_or_variant() {
+        let res = typecheck_program(&trivial_program(vec![Statement::Return(OpExpr::Match {
+            scrutinee: Box::new(OpExpr::Int(7)),
+            arms: vec![],
+            catch_all: Box::new(OpExpr::Unit),
+        })]));
+        assert!(!res.success);
+        assert!(res
+            .errors
+            .iter()
+            .any(|e| e.contains("match scrutinee must be Bool or Variant")));
+    }
+
+    #[test]
+    fn bool_match_must_cover_both_constructors() {
+        let res = typecheck_program(&trivial_program(vec![Statement::Return(OpExpr::Match {
+            scrutinee: Box::new(OpExpr::Bool(true)),
+            arms: vec![MatchArm {
+                pattern: "true".to_string(),
+                binding: "_".to_string(),
+                body: OpExpr::Int(1),
+            }],
+            catch_all: Box::new(OpExpr::Int(0)),
+        })]));
+        assert!(!res.success);
+        assert!(res
+            .errors
+            .iter()
+            .any(|e| e.contains("match is missing constructor arm `false`")));
     }
 
     #[test]
@@ -713,5 +1416,38 @@ mod tests {
         let row = program_effect_row(&prog);
         assert!(row.contains(&Effect::SanctionsCheck));
         assert!(row.contains(&Effect::ExternalRead));
+    }
+
+    #[test]
+    fn program_effect_row_includes_expression_calls() {
+        let prog = trivial_program(vec![Statement::Return(OpExpr::Call(
+            "sanctions.check".to_string(),
+            vec![],
+        ))]);
+        let row = program_effect_row(&prog);
+        assert!(row.contains(&Effect::SanctionsCheck));
+        assert!(row.contains(&Effect::ExternalRead));
+    }
+
+    #[test]
+    fn typecheck_rejects_missing_program_effect_declaration() {
+        let mut prog = trivial_program(vec![Statement::Return(OpExpr::Call(
+            "sanctions.check".to_string(),
+            vec![],
+        ))]);
+        let res = typecheck_program(&prog);
+        assert!(!res.success);
+        assert!(res
+            .errors
+            .iter()
+            .any(|e| e.contains("program effect declaration missing inferred effects")));
+
+        prog.effects = vec![Effect::SanctionsCheck, Effect::ExternalRead];
+        let res = typecheck_program(&prog);
+        assert!(
+            res.success,
+            "expected declared effects to pass: {:?}",
+            res.errors
+        );
     }
 }

@@ -3,7 +3,7 @@ name = "op-lex-compiler"
 version = "0.1.0"
 edition = "2021"
 license = "Apache-2.0"
-description = "Compilation function [[·]] : Lex -> Op, as specified in the Op paper §6.2."
+description = "Compilation function [[.]] : L_adm -> Op, as specified in the Op paper §6.2."
 
 [dependencies]
 op-core = { path = "../op-core" }

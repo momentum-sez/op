@@ -1,4 +1,4 @@
-//! Compilation-function microbenchmark `[[·]] : Lex -> Op`.
+//! Compilation-function microbenchmark `[[.]] : L_adm -> Op`.
 //!
 //! B4 from the Op paper's empirical evaluation: end-to-end
 //! `compile_lex` throughput on a workload of 100 admissible Lex terms
@@ -39,7 +39,11 @@ fn build_workload() -> Vec<LexTerm> {
     // 20 prelude variable references (canonical prelude ships
     // `prelude.true` and `prelude.false` — we alternate).
     for i in 0..20 {
-        let name = if i % 2 == 0 { "prelude.true" } else { "prelude.false" };
+        let name = if i % 2 == 0 {
+            "prelude.true"
+        } else {
+            "prelude.false"
+        };
         terms.push(LexTerm::var(name, i as u32));
     }
 
@@ -47,7 +51,11 @@ fn build_workload() -> Vec<LexTerm> {
     for i in 0..15 {
         terms.push(LexTerm::Match {
             scrutinee: Box::new(LexTerm::Const(LexValue::Variant {
-                tag: if i % 2 == 0 { "yes".to_string() } else { "no".to_string() },
+                tag: if i % 2 == 0 {
+                    "yes".to_string()
+                } else {
+                    "no".to_string()
+                },
                 payload: Box::new(LexValue::Unit),
             })),
             branches: vec![
@@ -112,9 +120,8 @@ fn bench_compile_lex(c: &mut Criterion) {
     // compiles without error. Failure here would be a setup bug,
     // not a measurement.
     for (i, term) in workload.iter().enumerate() {
-        compile_lex(term, &ctx).unwrap_or_else(|e| {
-            panic!("workload[{i}] failed to compile: {e:?}")
-        });
+        compile_lex(term, &ctx)
+            .unwrap_or_else(|e| panic!("workload[{i}] failed to compile: {e:?}"));
     }
 
     let mut group = c.benchmark_group("compile_lex");

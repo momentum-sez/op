@@ -112,6 +112,32 @@ pub enum EffectSafetyError {
         /// Step identifier.
         step: String,
     },
+
+    /// An expression-level host call names no canonical primitive. Unknown
+    /// primitives are not pure by default; embedders must route them through a
+    /// typed step signature or a future signed primitive registry.
+    #[error("unknown primitive '{primitive}' at '{site}' has no canonical effect row")]
+    UnknownPrimitive {
+        /// Primitive identifier.
+        primitive: String,
+        /// Statement or step site.
+        site: String,
+    },
+
+    /// A primitive step declared an effect not present in its canonical row.
+    /// Caller-provided signatures are not evidence for host effects.
+    #[error(
+        "step '{step}' declares {effect:?} for primitive '{primitive}', but the canonical row does \
+         not justify it"
+    )]
+    UnjustifiedStepEffect {
+        /// Step identifier.
+        step: String,
+        /// Primitive identifier.
+        primitive: String,
+        /// Unjustified declared effect.
+        effect: Effect,
+    },
 }
 
 /// The set of write-class effects that require a dominating sanctions check.
@@ -164,8 +190,13 @@ impl SafetyCtx {
         match stmt {
             Statement::Step(step) => {
                 self.check_step(step);
-                // Update sanctions visibility from this step's effects.
-                if step.signature.effects.iter().any(|e| *e == Effect::SanctionsCheck) {
+                // Update sanctions visibility only from effects justified by
+                // the step body itself. A caller-provided signature cannot
+                // certify its own dominator.
+                if step_authoritative_effects(step)
+                    .iter()
+                    .any(|e| *e == Effect::SanctionsCheck)
+                {
                     self.sanctions_seen = true;
                 }
             }
@@ -242,6 +273,19 @@ impl SafetyCtx {
     /// `sanctions_seen` if the expression carries a `SanctionsCheck` effect
     /// (e.g. a `sanctions.check` call).
     fn check_expr_in_stmt(&mut self, expr: &OpExpr, site: &str) {
+        if let OpExpr::Seq(a, b) = expr {
+            self.check_expr_in_stmt(a, site);
+            self.check_expr_in_stmt(b, site);
+            return;
+        }
+
+        for primitive in unknown_expr_calls(expr) {
+            self.errors.push(EffectSafetyError::UnknownPrimitive {
+                primitive,
+                site: site.to_string(),
+            });
+        }
+
         let walked = walk_expr_effects(expr);
         let write_class = write_class_effects();
         for entry in &walked {
@@ -264,9 +308,8 @@ impl SafetyCtx {
 
     fn check_step(&mut self, step: &crate::ast::OpStep) {
         let write_class = write_class_effects();
-        let step_has_write = step
-            .signature
-            .effects
+        let authoritative_effects = step_authoritative_effects(step);
+        let step_has_write = authoritative_effects
             .iter()
             .any(|e| write_class.contains(e));
 
@@ -274,7 +317,7 @@ impl SafetyCtx {
             // Deferred-subject exception: if the step is an entity-creation
             // primitive, the sanctions check is allowed to run post-flight.
             if !is_entity_create_primitive(&step.body) {
-                for e in &step.signature.effects {
+                for e in &authoritative_effects {
                     if write_class.contains(e) {
                         self.errors.push(EffectSafetyError::UndominatedWrite {
                             effect: e.clone(),
@@ -288,7 +331,7 @@ impl SafetyCtx {
         // Compensation sanity: a compensation clause requires at least one
         // compensable effect (sovereign_write or fiscal_transfer).
         if step.compensate.is_some() {
-            let has_compensable = step.signature.effects.iter().any(|e| {
+            let has_compensable = authoritative_effects.iter().any(|e| {
                 matches!(
                     e,
                     Effect::SovereignWrite | Effect::FiscalTransfer | Effect::IdentityMutation
@@ -304,15 +347,18 @@ impl SafetyCtx {
 
         // Continue-on-sovereign-write is forbidden.
         if matches!(step.on_failure, Some(crate::ast::FailureAction::Continue))
-            && step
-                .signature
-                .effects
+            && authoritative_effects
                 .iter()
                 .any(|e| *e == Effect::SovereignWrite)
         {
-            self.errors.push(EffectSafetyError::ContinueOnSovereignWrite {
-                step: step.id.clone(),
-            });
+            self.errors
+                .push(EffectSafetyError::ContinueOnSovereignWrite {
+                    step: step.id.clone(),
+                });
+        }
+
+        if let Some(comp) = &step.compensate {
+            self.check_compensation_body(&comp.body, &format!("{}:compensate", step.id));
         }
 
         // Arguments to a step's primitive body, and any inline block body,
@@ -322,6 +368,26 @@ impl SafetyCtx {
         // chain a sanctions sub-call before a subsequent write.
         match &step.body {
             StepBody::Primitive(prim, args) => {
+                let canonical_known = canonical_primitive_known(&prim.0);
+                if !canonical_known {
+                    self.errors.push(EffectSafetyError::UnknownPrimitive {
+                        primitive: prim.0.clone(),
+                        site: step.id.clone(),
+                    });
+                } else {
+                    let canonical: BTreeSet<_> =
+                        canonical_effects_for(&prim.0).into_iter().collect();
+                    for effect in &step.signature.effects {
+                        if !matches!(effect, Effect::Pure) && !canonical.contains(effect) {
+                            self.errors.push(EffectSafetyError::UnjustifiedStepEffect {
+                                step: step.id.clone(),
+                                primitive: prim.0.clone(),
+                                effect: effect.clone(),
+                            });
+                        }
+                    }
+                }
+
                 // Treat the call as a synthetic expression: primitive's
                 // canonical effects + every argument's effects.
                 let mut synthesized = Vec::new();
@@ -333,21 +399,85 @@ impl SafetyCtx {
                     });
                 }
                 for (_, arg) in args {
+                    for primitive in unknown_expr_calls(arg) {
+                        self.errors.push(EffectSafetyError::UnknownPrimitive {
+                            primitive,
+                            site: format!("{}:{}", step.id, prim.0),
+                        });
+                    }
                     synthesized.extend(walk_expr_effects(arg));
                 }
                 for entry in &synthesized {
-                    if write_class.contains(&entry.effect) && !self.sanctions_seen {
-                        if !entry.deferred_subject {
-                            // Step already reports this via the
-                            // signature-level path; skip duplicates when the
-                            // step declared the same effect on its signature.
-                            if !step.signature.effects.contains(&entry.effect) {
-                                self.errors.push(EffectSafetyError::UndominatedWrite {
-                                    effect: entry.effect.clone(),
-                                    step: format!("{}:{}", step.id, entry.call_name),
-                                });
-                            }
+                    if write_class.contains(&entry.effect)
+                        && !self.sanctions_seen
+                        && !entry.deferred_subject
+                    {
+                        // Step already reports this via the signature-level
+                        // path; skip duplicates when the step declared the
+                        // same effect on its signature.
+                        if !step.signature.effects.contains(&entry.effect) {
+                            self.errors.push(EffectSafetyError::UndominatedWrite {
+                                effect: entry.effect.clone(),
+                                step: format!("{}:{}", step.id, entry.call_name),
+                            });
                         }
+                    }
+                }
+                if synthesized
+                    .iter()
+                    .any(|e| e.effect == Effect::SanctionsCheck)
+                {
+                    self.sanctions_seen = true;
+                }
+            }
+            StepBody::Block(inner) => {
+                let parent = self.sanctions_seen;
+                let mut sub = SafetyCtx {
+                    sanctions_seen: parent,
+                    errors: Vec::new(),
+                };
+                sub.walk_block(inner);
+                self.errors.extend(sub.errors);
+                self.sanctions_seen = self.sanctions_seen || sub.sanctions_seen;
+            }
+        }
+    }
+
+    fn check_compensation_body(&mut self, body: &StepBody, site: &str) {
+        let write_class = write_class_effects();
+        match body {
+            StepBody::Primitive(prim, args) => {
+                if !canonical_primitive_known(&prim.0) {
+                    self.errors.push(EffectSafetyError::UnknownPrimitive {
+                        primitive: prim.0.clone(),
+                        site: site.to_string(),
+                    });
+                }
+
+                let mut synthesized = Vec::new();
+                for (_, arg) in args {
+                    for primitive in unknown_expr_calls(arg) {
+                        self.errors.push(EffectSafetyError::UnknownPrimitive {
+                            primitive,
+                            site: format!("{site}:{}", prim.0),
+                        });
+                    }
+                    synthesized.extend(walk_expr_effects(arg));
+                }
+                for eff in canonical_effects_for(&prim.0) {
+                    synthesized.push(WalkedCall {
+                        call_name: prim.0.clone(),
+                        effect: eff,
+                        deferred_subject: false,
+                    });
+                }
+
+                for entry in &synthesized {
+                    if write_class.contains(&entry.effect) && !self.sanctions_seen {
+                        self.errors.push(EffectSafetyError::UndominatedWrite {
+                            effect: entry.effect.clone(),
+                            step: format!("{site}:{}", entry.call_name),
+                        });
                     }
                 }
                 if synthesized
@@ -394,6 +524,68 @@ pub(crate) fn walk_expr_effects(expr: &OpExpr) -> Vec<WalkedCall> {
     let mut out: Vec<WalkedCall> = Vec::new();
     walk_expr_effects_into(expr, &mut out);
     out
+}
+
+fn unknown_expr_calls(expr: &OpExpr) -> Vec<String> {
+    let mut out = Vec::new();
+    collect_unknown_expr_calls(expr, &mut out);
+    out.sort();
+    out.dedup();
+    out
+}
+
+fn collect_unknown_expr_calls(expr: &OpExpr, out: &mut Vec<String>) {
+    match expr {
+        OpExpr::Unit
+        | OpExpr::Bool(_)
+        | OpExpr::Int(_)
+        | OpExpr::String(_)
+        | OpExpr::Null
+        | OpExpr::Var(_)
+        | OpExpr::Await { .. }
+        | OpExpr::AssertSafety(_) => {}
+        OpExpr::Field(e, _) => collect_unknown_expr_calls(e, out),
+        OpExpr::Record(fields) => {
+            for (_, e) in fields {
+                collect_unknown_expr_calls(e, out);
+            }
+        }
+        OpExpr::List(es) | OpExpr::Tuple(es) => {
+            for e in es {
+                collect_unknown_expr_calls(e, out);
+            }
+        }
+        OpExpr::Call(name, args) => {
+            if !canonical_primitive_known(name) {
+                out.push(name.clone());
+            }
+            for (_, a) in args {
+                collect_unknown_expr_calls(a, out);
+            }
+        }
+        OpExpr::BinOp(_, a, b) | OpExpr::Coalesce(a, b) | OpExpr::Seq(a, b) => {
+            collect_unknown_expr_calls(a, out);
+            collect_unknown_expr_calls(b, out);
+        }
+        OpExpr::UnOp(_, a) => collect_unknown_expr_calls(a, out),
+        OpExpr::Match {
+            scrutinee,
+            arms,
+            catch_all,
+        } => {
+            collect_unknown_expr_calls(scrutinee, out);
+            for MatchArm { body, .. } in arms {
+                collect_unknown_expr_calls(body, out);
+            }
+            collect_unknown_expr_calls(catch_all, out);
+        }
+        OpExpr::ConsumeLinear(inner) => collect_unknown_expr_calls(inner, out),
+        OpExpr::Lock { resource, .. } => collect_unknown_expr_calls(resource, out),
+        OpExpr::CommitTransfer { locked, witness } | OpExpr::ReleaseLock { locked, witness } => {
+            collect_unknown_expr_calls(locked, out);
+            collect_unknown_expr_calls(witness, out);
+        }
+    }
 }
 
 fn walk_expr_effects_into(expr: &OpExpr, out: &mut Vec<WalkedCall>) {
@@ -447,8 +639,7 @@ fn walk_expr_effects_into(expr: &OpExpr, out: &mut Vec<WalkedCall>) {
         }
         OpExpr::ConsumeLinear(inner) => walk_expr_effects_into(inner, out),
         OpExpr::Lock { resource, .. } => walk_expr_effects_into(resource, out),
-        OpExpr::CommitTransfer { locked, witness }
-        | OpExpr::ReleaseLock { locked, witness } => {
+        OpExpr::CommitTransfer { locked, witness } | OpExpr::ReleaseLock { locked, witness } => {
             walk_expr_effects_into(locked, out);
             walk_expr_effects_into(witness, out);
         }
@@ -460,8 +651,9 @@ fn walk_expr_effects_into(expr: &OpExpr, out: &mut Vec<WalkedCall>) {
 /// Mirrors the shapes op-stdlib carries in `CANONICAL_PRIMITIVES`. op-core
 /// cannot depend on op-stdlib (stdlib depends on core), so the shape table
 /// is inlined here. A primitive name not present returns an empty effect
-/// row — conservative: the analyzer treats the call as pure and defers to
-/// the host to reject an unknown name at run time.
+/// row for aggregation only. Safety checking rejects unknown expression
+/// calls explicitly; embedders must not rely on host rejection as an effect
+/// proof.
 pub(crate) fn canonical_effects_for(name: &str) -> Vec<Effect> {
     match name {
         // Entity
@@ -480,9 +672,7 @@ pub(crate) fn canonical_effects_for(name: &str) -> Vec<Effect> {
         // Identity
         "identity.verify" => vec![Effect::ExternalRead, Effect::IdentityMutation],
         // Consent
-        "consent.board_resolution"
-        | "consent.member_resolution"
-        | "consent.shareholder_vote" => {
+        "consent.board_resolution" | "consent.member_resolution" | "consent.shareholder_vote" => {
             vec![Effect::GovernanceRequest, Effect::SovereignWrite]
         }
         // Screening
@@ -503,10 +693,41 @@ pub(crate) fn canonical_effects_for(name: &str) -> Vec<Effect> {
         "filing.registry_amendment" => {
             vec![Effect::SovereignWrite, Effect::ProofEmit]
         }
-        // Attestation — ProofEmit only, infallible τ-labelled append.
+        // Attestation — ProofEmit only; successful append is tau-labelled.
+        // Failed persistence is not tau and must fail closed.
         "attestation.append" | "attestation.emit" => vec![Effect::ProofEmit],
         _ => Vec::new(),
     }
+}
+
+pub(crate) fn canonical_primitive_known(name: &str) -> bool {
+    matches!(
+        name,
+        "create.entity"
+            | "update.entity_status"
+            | "ownership.issue_shares"
+            | "ownership.transfer"
+            | "update.cap_table"
+            | "membership.admit"
+            | "create.treasury"
+            | "create.bank_account"
+            | "fiscal.open_account"
+            | "fiscal.transfer"
+            | "identity.verify"
+            | "consent.board_resolution"
+            | "consent.member_resolution"
+            | "consent.shareholder_vote"
+            | "screening.sanctions"
+            | "sanctions.check"
+            | "trade.invoice_create"
+            | "trade.lc_issue"
+            | "document.board_minutes"
+            | "document.shareholder_minutes"
+            | "document.commercial_invoice"
+            | "filing.registry_amendment"
+            | "attestation.append"
+            | "attestation.emit"
+    )
 }
 
 /// Whether the canonical primitive is deferred-subject class (entity
@@ -527,6 +748,25 @@ fn is_entity_create_primitive(body: &StepBody) -> bool {
     }
 }
 
+fn step_authoritative_effects(step: &crate::ast::OpStep) -> BTreeSet<Effect> {
+    let mut effects = BTreeSet::new();
+    match &step.body {
+        StepBody::Primitive(prim, _args) => {
+            for effect in canonical_effects_for(&prim.0) {
+                effects.insert(effect);
+            }
+        }
+        StepBody::Block(_inner) => {
+            for effect in &step.signature.effects {
+                if !matches!(effect, Effect::Pure) {
+                    effects.insert(effect.clone());
+                }
+            }
+        }
+    }
+    effects
+}
+
 /// Flatten all effects occurring in any expression (used when computing
 /// program-level effect rows from a mixed body).
 #[allow(dead_code)]
@@ -534,27 +774,35 @@ pub(crate) fn expr_effects(expr: &OpExpr) -> EffectRow {
     match expr {
         OpExpr::Await { event, .. } => EffectRow::singleton(Effect::Await(event.clone())),
         OpExpr::ConsumeLinear(inner)
-        | OpExpr::Lock { resource: inner, .. } => expr_effects(inner),
-        OpExpr::CommitTransfer { locked, witness }
-        | OpExpr::ReleaseLock {
-            locked,
-            witness,
-        } => expr_effects(locked).union(&expr_effects(witness)),
+        | OpExpr::Lock {
+            resource: inner, ..
+        } => expr_effects(inner),
+        OpExpr::CommitTransfer { locked, witness } | OpExpr::ReleaseLock { locked, witness } => {
+            expr_effects(locked).union(&expr_effects(witness))
+        }
         OpExpr::Record(fields) => fields.iter().fold(EffectRow::empty(), |acc, (_, e)| {
             acc.union(&expr_effects(e))
         }),
         OpExpr::List(items) | OpExpr::Tuple(items) => items
             .iter()
             .fold(EffectRow::empty(), |acc, e| acc.union(&expr_effects(e))),
-        OpExpr::Call(_, args) => args.iter().fold(EffectRow::empty(), |acc, (_, e)| {
-            acc.union(&expr_effects(e))
-        }),
+        OpExpr::Call(name, args) => {
+            let mut row = EffectRow::from(canonical_effects_for(name));
+            for (_, e) in args {
+                row = row.union(&expr_effects(e));
+            }
+            row
+        }
         OpExpr::BinOp(_, a, b) => expr_effects(a).union(&expr_effects(b)),
         OpExpr::UnOp(_, a) => expr_effects(a),
         OpExpr::Coalesce(a, b) => expr_effects(a).union(&expr_effects(b)),
         OpExpr::Seq(a, b) => expr_effects(a).union(&expr_effects(b)),
         OpExpr::Field(e, _) => expr_effects(e),
-        OpExpr::Match { scrutinee, arms, catch_all } => {
+        OpExpr::Match {
+            scrutinee,
+            arms,
+            catch_all,
+        } => {
             let mut row = expr_effects(scrutinee);
             for arm in arms {
                 row = row.union(&expr_effects(&arm.body));
@@ -573,7 +821,7 @@ mod tests {
     fn step_with_effects(id: &str, effects: Vec<Effect>) -> OpStep {
         OpStep {
             id: id.to_string(),
-            body: StepBody::Primitive(Primitive("some.op".to_string()), vec![]),
+            body: StepBody::Block(vec![]),
             signature: StepSignature {
                 input: OpType::Unit,
                 output: OpType::Unit,
@@ -671,9 +919,10 @@ mod tests {
         });
         let prog = program(vec![Statement::Step(step)]);
         let err = check_effect_safety(&prog).unwrap_err();
-        assert!(err
-            .iter()
-            .any(|e| matches!(e, EffectSafetyError::CompensationWithoutCompensableEffect { .. })));
+        assert!(err.iter().any(|e| matches!(
+            e,
+            EffectSafetyError::CompensationWithoutCompensableEffect { .. }
+        )));
     }
 
     #[test]
@@ -695,6 +944,94 @@ mod tests {
             )),
             "expected UndominatedWrite for ownership.transfer; got {err:?}"
         );
+    }
+
+    #[test]
+    fn unknown_expression_primitive_is_rejected() {
+        let prog = program(vec![Statement::Return(OpExpr::Call(
+            "opaque.host_write".to_string(),
+            vec![],
+        ))]);
+        let err = check_effect_safety(&prog).unwrap_err();
+        assert!(
+            err.iter().any(|e| matches!(
+                e,
+                EffectSafetyError::UnknownPrimitive { primitive, .. }
+                    if primitive == "opaque.host_write"
+            )),
+            "expected UnknownPrimitive; got {err:?}"
+        );
+    }
+
+    #[test]
+    fn unknown_step_primitive_is_rejected_even_with_declared_effects() {
+        let step = OpStep {
+            id: "fake_gate".to_string(),
+            body: StepBody::Primitive(Primitive("opaque.host_write".to_string()), vec![]),
+            signature: StepSignature {
+                input: OpType::Unit,
+                output: OpType::Unit,
+                effects: vec![Effect::SanctionsCheck],
+            },
+            wait: None,
+            on_failure: None,
+            compensate: None,
+            contracts: Contracts::default(),
+        };
+        let prog = program(vec![Statement::Step(step)]);
+        let err = check_effect_safety(&prog).unwrap_err();
+        assert!(err.iter().any(|e| matches!(
+            e,
+            EffectSafetyError::UnknownPrimitive { primitive, site }
+                if primitive == "opaque.host_write" && site == "fake_gate"
+        )));
+    }
+
+    #[test]
+    fn declared_step_effects_cannot_fake_sanctions_dominance() {
+        let fake_gate = OpStep {
+            id: "fake_gate".to_string(),
+            body: StepBody::Primitive(Primitive("document.board_minutes".to_string()), vec![]),
+            signature: StepSignature {
+                input: OpType::Unit,
+                output: OpType::Unit,
+                effects: vec![Effect::SanctionsCheck],
+            },
+            wait: None,
+            on_failure: None,
+            compensate: None,
+            contracts: Contracts::default(),
+        };
+        let write = OpStep {
+            id: "write".to_string(),
+            body: StepBody::Primitive(Primitive("ownership.transfer".to_string()), vec![]),
+            signature: StepSignature {
+                input: OpType::Unit,
+                output: OpType::Unit,
+                effects: vec![Effect::SovereignWrite],
+            },
+            wait: None,
+            on_failure: None,
+            compensate: None,
+            contracts: Contracts::default(),
+        };
+        let prog = program(vec![Statement::Step(fake_gate), Statement::Step(write)]);
+        let err = check_effect_safety(&prog).unwrap_err();
+        assert!(err.iter().any(|e| matches!(
+            e,
+            EffectSafetyError::UnjustifiedStepEffect {
+                step,
+                primitive,
+                effect
+            } if step == "fake_gate"
+                && primitive == "document.board_minutes"
+                && *effect == Effect::SanctionsCheck
+        )));
+        assert!(err.iter().any(|e| matches!(
+            e,
+            EffectSafetyError::UndominatedWrite { step, effect }
+                if step == "write" && *effect == Effect::SovereignWrite
+        )));
     }
 
     #[test]
@@ -727,11 +1064,17 @@ mod tests {
                 "sanctions.check".to_string(),
                 vec![("principal".to_string(), OpExpr::String("x".to_string()))],
             )),
-            Statement::Return(OpExpr::Call(
-                "ownership.transfer".to_string(),
-                vec![],
-            )),
+            Statement::Return(OpExpr::Call("ownership.transfer".to_string(), vec![])),
         ]);
+        assert!(check_effect_safety(&prog).is_ok());
+    }
+
+    #[test]
+    fn seq_sanctions_then_write_is_ordered_and_admitted() {
+        let prog = program(vec![Statement::Return(OpExpr::Seq(
+            Box::new(OpExpr::Call("sanctions.check".to_string(), vec![])),
+            Box::new(OpExpr::Call("ownership.transfer".to_string(), vec![])),
+        ))]);
         assert!(check_effect_safety(&prog).is_ok());
     }
 
@@ -779,11 +1122,51 @@ mod tests {
                     vec![Effect::SanctionsCheck],
                 ))]),
             },
-            Statement::Step(step_with_effects(
-                "write",
-                vec![Effect::SovereignWrite],
-            )),
+            Statement::Step(step_with_effects("write", vec![Effect::SovereignWrite])),
         ]);
         assert!(check_effect_safety(&prog).is_ok());
+    }
+
+    #[test]
+    fn compensation_body_write_requires_gate() {
+        let mut step = OpStep {
+            id: "create".to_string(),
+            body: StepBody::Primitive(Primitive("create.entity".to_string()), vec![]),
+            signature: StepSignature {
+                input: OpType::Unit,
+                output: OpType::EntityRef,
+                effects: vec![Effect::SovereignWrite],
+            },
+            wait: None,
+            on_failure: None,
+            compensate: Some(CompensationClause {
+                body: StepBody::Primitive(Primitive("ownership.transfer".to_string()), vec![]),
+                invalidated_domains: vec![],
+            }),
+            contracts: Contracts::default(),
+        };
+        let prog = program(vec![Statement::Step(step.clone())]);
+        let err = check_effect_safety(&prog).unwrap_err();
+        assert!(
+            err.iter().any(|e| matches!(
+                e,
+                EffectSafetyError::UndominatedWrite { step, .. }
+                    if step == "create:compensate:ownership.transfer"
+            )),
+            "expected compensation write rejection; got {err:?}"
+        );
+
+        step.body = StepBody::Primitive(Primitive("some.op".to_string()), vec![]);
+        step.signature.effects = vec![];
+        let prog = program(vec![Statement::Step(step)]);
+        let err = check_effect_safety(&prog).unwrap_err();
+        assert!(
+            err.iter().any(|e| matches!(
+                e,
+                EffectSafetyError::UnknownPrimitive { primitive, site }
+                    if primitive == "some.op" && site == "create"
+            )),
+            "expected unknown primitive rejection; got {err:?}"
+        );
     }
 }

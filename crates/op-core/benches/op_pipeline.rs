@@ -22,8 +22,8 @@ use std::collections::BTreeMap;
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use op_core::host::{HostOutcome, NoopHost, OpHost, PrimitiveCall};
 use op_core::{
-    program_effect_row, typecheck_program, Contracts, Effect, GasBudget, OpExpr, OpProgram,
-    OpStep, OpType, Primitive, ProgramMetadata, Statement, StepBody, StepSignature,
+    program_effect_row, typecheck_program, Contracts, Effect, GasBudget, OpExpr, OpProgram, OpStep,
+    OpType, Primitive, ProgramMetadata, Statement, StepBody, StepSignature,
 };
 
 /// Build the smallest well-typed program: sanctions gate + one
@@ -104,7 +104,10 @@ fn write_step(id: &str) -> Statement {
         body: StepBody::Primitive(
             Primitive("update.entity_status".to_string()),
             vec![
-                ("entity_id".to_string(), OpExpr::String("entity-xyz".to_string())),
+                (
+                    "entity_id".to_string(),
+                    OpExpr::String("entity-xyz".to_string()),
+                ),
                 ("status".to_string(), OpExpr::String("ACTIVE".to_string())),
             ],
         ),
@@ -145,8 +148,12 @@ fn reduce_args(args: &[(String, OpExpr)]) -> BTreeMap<String, serde_json::Value>
 fn execute(program: &OpProgram, host: &NoopHost) -> usize {
     let mut count = 0usize;
     for stmt in &program.body {
-        let Statement::Step(step) = stmt else { continue };
-        let StepBody::Primitive(prim, args) = &step.body else { continue };
+        let Statement::Step(step) = stmt else {
+            continue;
+        };
+        let StepBody::Primitive(prim, args) = &step.body else {
+            continue;
+        };
         let call = PrimitiveCall {
             primitive: prim.clone(),
             args: reduce_args(args),

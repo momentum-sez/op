@@ -39,10 +39,7 @@ impl OpHost for SanctionsHost {
                     primitive: "sanctions.check".to_string(),
                     detail: "missing principal string".to_string(),
                 })?;
-            let blocked = self
-                .sanctioned_principals
-                .iter()
-                .any(|p| p == principal);
+            let blocked = self.sanctioned_principals.iter().any(|p| p == principal);
             let verdict = if blocked {
                 json!({ "tag": "SanctionsBlocked", "value": { "principal": principal } })
             } else {
@@ -53,11 +50,7 @@ impl OpHost for SanctionsHost {
         Err(HostError::UnknownPrimitive(call.primitive.0.clone()))
     }
 
-    fn discharge_safety(
-        &self,
-        _pred: &SafetyPredicate,
-        _ctx: &Value,
-    ) -> Result<(), HostError> {
+    fn discharge_safety(&self, _pred: &SafetyPredicate, _ctx: &Value) -> Result<(), HostError> {
         Ok(())
     }
 }
@@ -129,7 +122,5 @@ fn program_declares_sanctions_check_effect() {
     let term = LexTerm::sanctions_dominance_of(LexTerm::const_string("any"));
     let ctx = CompileCtx::with_canonical_prelude("demo.sanctions");
     let program = compile_lex(&term, &ctx).unwrap();
-    assert!(program
-        .effects
-        .contains(&op_core::Effect::SanctionsCheck));
+    assert!(program.effects.contains(&op_core::Effect::SanctionsCheck));
 }

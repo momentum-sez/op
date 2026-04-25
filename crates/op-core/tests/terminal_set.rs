@@ -136,12 +136,7 @@ fn outcome_terminal_tags_are_snake_case() {
             },
             "paused",
         ),
-        (
-            Outcome::Halted {
-                reason: "x".into(),
-            },
-            "halted",
-        ),
+        (Outcome::Halted { reason: "x".into() }, "halted"),
         (
             Outcome::SanctionsBlocked {
                 principal: "p".into(),

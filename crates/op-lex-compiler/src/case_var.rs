@@ -11,17 +11,11 @@ use op_core::OpExpr;
 
 /// Compile a variable reference.
 pub fn compile_var(name: &str, ctx: &CompileCtx) -> Result<OpExpr, CompileError> {
+    if ctx.lookup_binder(name).is_some() {
+        return Ok(OpExpr::Var(name.to_string()));
+    }
     if let Some((_ty, expr)) = ctx.prelude.lookup_value(name) {
         return Ok(expr.clone());
-    }
-    // A variable whose name matches a callable lowers to a thunk — an Op
-    // `Call` with empty args. The evaluator will error on execution if the
-    // callee requires arguments, which is the intended behavior for an
-    // improper nullary use.
-    if let Some(callable) = ctx.prelude.lookup_callable(name) {
-        if let crate::context::PreludeLower::PrimitiveCall { name: pname } = &callable.lower {
-            return Ok(OpExpr::Call(pname.clone(), vec![]));
-        }
     }
     Err(CompileError::UnboundVariable {
         name: name.to_string(),

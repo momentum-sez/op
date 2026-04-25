@@ -31,13 +31,12 @@ impl FixedOracleHost {
 }
 
 impl OpHost for FixedOracleHost {
-    fn invoke(
-        &self,
-        call: &PrimitiveCall,
-    ) -> Result<op_core::HostOutcome, op_core::HostError> {
+    fn invoke(&self, call: &PrimitiveCall) -> Result<op_core::HostOutcome, op_core::HostError> {
         match self.oracle.get(&call.primitive.0) {
             Some(v) => Ok(op_core::HostOutcome::Completed(v.clone())),
-            None => Err(op_core::HostError::UnknownPrimitive(call.primitive.0.clone())),
+            None => Err(op_core::HostError::UnknownPrimitive(
+                call.primitive.0.clone(),
+            )),
         }
     }
 }
@@ -65,7 +64,9 @@ struct ProofBundle {
 fn execute_and_bundle(program: &OpProgram, host: &dyn OpHost) -> ProofBundle {
     let mut entries: Vec<BundleEntry> = Vec::new();
     for stmt in &program.body {
-        let Statement::Step(step) = stmt else { continue };
+        let Statement::Step(step) = stmt else {
+            continue;
+        };
         let (prim, arg_pairs) = match &step.body {
             StepBody::Primitive(p, args) => (p.clone(), args.clone()),
             StepBody::Block(_) => continue,
@@ -171,9 +172,10 @@ fn three_step_program() -> OpProgram {
         id: "attest".to_string(),
         body: StepBody::Primitive(
             Primitive("attestation.emit".to_string()),
-            vec![
-                ("digest".to_string(), OpExpr::String("0xdeadbeef".to_string())),
-            ],
+            vec![(
+                "digest".to_string(),
+                OpExpr::String("0xdeadbeef".to_string()),
+            )],
         ),
         signature: StepSignature {
             input: OpType::Unit,
@@ -195,7 +197,11 @@ fn three_step_program() -> OpProgram {
         participants: vec![],
         approval: None,
         contracts: Contracts::default(),
-        body: vec![Statement::Step(s1), Statement::Step(s2), Statement::Step(s3)],
+        body: vec![
+            Statement::Step(s1),
+            Statement::Step(s2),
+            Statement::Step(s3),
+        ],
         gas_budget: GasBudget::default(),
     }
 }
@@ -227,7 +233,8 @@ fn two_runs_produce_byte_identical_bundles() {
     let bytes_b = digest(&bundle_b);
 
     assert_eq!(
-        bytes_a, bytes_b,
+        bytes_a,
+        bytes_b,
         "proof bundle bytes diverged across runs: {} vs {}",
         String::from_utf8_lossy(&bytes_a),
         String::from_utf8_lossy(&bytes_b)

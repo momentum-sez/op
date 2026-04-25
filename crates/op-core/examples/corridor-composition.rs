@@ -90,7 +90,10 @@ impl Verdict {
 fn main() {
     // 1. PARSE. The mutual-recognition program, authored as Rust AST.
     let program = build_program();
-    println!("program       : {}  (jurisdiction: {})", program.name, program.jurisdiction);
+    println!(
+        "program       : {}  (jurisdiction: {})",
+        program.name, program.jurisdiction
+    );
 
     // 2. TYPECHECK. Sanctions-check dominates sovereign_write + proof_emit.
     let check = typecheck_program(&program);
@@ -107,16 +110,8 @@ fn main() {
 
     // 3. EXECUTE — two scenarios.
     let scenarios = [
-        (
-            "admit",
-            adgm_tensor_clean(),
-            seychelles_tensor_clean(),
-        ),
-        (
-            "block",
-            adgm_tensor_bo_fail(),
-            seychelles_tensor_clean(),
-        ),
+        ("admit", adgm_tensor_clean(), seychelles_tensor_clean()),
+        ("block", adgm_tensor_bo_fail(), seychelles_tensor_clean()),
     ];
 
     for (label, t_a, t_b) in scenarios {
@@ -141,7 +136,10 @@ fn build_program() -> OpProgram {
         body: StepBody::Primitive(
             Primitive("tensor.fetch".to_string()),
             vec![
-                ("entity_id".to_string(), OpExpr::Var("entity_id".to_string())),
+                (
+                    "entity_id".to_string(),
+                    OpExpr::Var("entity_id".to_string()),
+                ),
                 ("zone".to_string(), OpExpr::String("adgm".to_string())),
             ],
         ),
@@ -165,7 +163,10 @@ fn build_program() -> OpProgram {
         body: StepBody::Primitive(
             Primitive("tensor.fetch".to_string()),
             vec![
-                ("entity_id".to_string(), OpExpr::Var("entity_id".to_string())),
+                (
+                    "entity_id".to_string(),
+                    OpExpr::Var("entity_id".to_string()),
+                ),
                 ("zone".to_string(), OpExpr::String("seychelles".to_string())),
             ],
         ),
@@ -191,8 +192,14 @@ fn build_program() -> OpProgram {
             Primitive("corridor.fetch_translation".to_string()),
             vec![
                 ("corridor".to_string(), OpExpr::Var("corridor".to_string())),
-                ("source_domains".to_string(), OpExpr::String("adgm".to_string())),
-                ("target_domains".to_string(), OpExpr::String("seychelles".to_string())),
+                (
+                    "source_domains".to_string(),
+                    OpExpr::String("adgm".to_string()),
+                ),
+                (
+                    "target_domains".to_string(),
+                    OpExpr::String("seychelles".to_string()),
+                ),
             ],
         ),
         signature: StepSignature {
@@ -252,11 +259,20 @@ fn build_program() -> OpProgram {
         body: StepBody::Primitive(
             Primitive("filing.foreign_branch_register".to_string()),
             vec![
-                ("entity_id".to_string(), OpExpr::Var("entity_id".to_string())),
-                ("target_zone".to_string(), OpExpr::Var("target_zone".to_string())),
+                (
+                    "entity_id".to_string(),
+                    OpExpr::Var("entity_id".to_string()),
+                ),
+                (
+                    "target_zone".to_string(),
+                    OpExpr::Var("target_zone".to_string()),
+                ),
                 (
                     "composed_tensor".to_string(),
-                    OpExpr::Field(Box::new(OpExpr::Var("t_ab".to_string())), "composed_tensor".to_string()),
+                    OpExpr::Field(
+                        Box::new(OpExpr::Var("t_ab".to_string())),
+                        "composed_tensor".to_string(),
+                    ),
                 ),
             ],
         ),
@@ -303,7 +319,10 @@ fn build_program() -> OpProgram {
             ],
         )],
         else_block: Some(vec![Statement::Return(OpExpr::Record(vec![
-            ("registration_id".to_string(), OpExpr::String("".to_string())),
+            (
+                "registration_id".to_string(),
+                OpExpr::String("".to_string()),
+            ),
             ("status".to_string(), OpExpr::String("BLOCKED".to_string())),
         ]))]),
     };
@@ -392,7 +411,10 @@ fn fetch_phi() -> Phi {
     let mut map = BTreeMap::new();
     map.insert("corporate".to_string(), "corporate".to_string());
     map.insert("aml".to_string(), "aml".to_string());
-    map.insert("beneficial_ownership".to_string(), "beneficial_ownership".to_string());
+    map.insert(
+        "beneficial_ownership".to_string(),
+        "beneficial_ownership".to_string(),
+    );
     map.insert("sanctions".to_string(), "sanctions".to_string());
     // sharia_compliance is deliberately absent from phi — the corridor
     // declares no translation for it.
@@ -412,13 +434,19 @@ fn adgm_tensor_clean() -> Tensor {
     entries.insert("beneficial_ownership".to_string(), Verdict::Compliant);
     entries.insert("sharia_compliance".to_string(), Verdict::Compliant);
     entries.insert("sanctions".to_string(), Verdict::Compliant);
-    Tensor { zone: "adgm".to_string(), entries }
+    Tensor {
+        zone: "adgm".to_string(),
+        entries,
+    }
 }
 
 fn adgm_tensor_bo_fail() -> Tensor {
     let mut entries = adgm_tensor_clean().entries;
     entries.insert("beneficial_ownership".to_string(), Verdict::NonCompliant);
-    Tensor { zone: "adgm".to_string(), entries }
+    Tensor {
+        zone: "adgm".to_string(),
+        entries,
+    }
 }
 
 fn seychelles_tensor_clean() -> Tensor {
@@ -428,7 +456,10 @@ fn seychelles_tensor_clean() -> Tensor {
     entries.insert("beneficial_ownership".to_string(), Verdict::Compliant);
     entries.insert("tax_residency".to_string(), Verdict::Compliant);
     entries.insert("sanctions".to_string(), Verdict::Compliant);
-    Tensor { zone: "seychelles".to_string(), entries }
+    Tensor {
+        zone: "seychelles".to_string(),
+        entries,
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -532,7 +563,10 @@ fn compose_via_phi(t_a: &Tensor, t_b: &Tensor, phi: &Phi) -> Composed {
         .map(|e| e.verdict)
         .fold(Verdict::Compliant, |acc, v| acc.meet(v));
 
-    Composed { entries: out, image_verdict }
+    Composed {
+        entries: out,
+        image_verdict,
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -679,7 +713,10 @@ fn execute(program: &OpProgram, host: &CorridorHost) -> ExecutionOutcome {
             .iter()
             .find(|(id, _)| id == "registration")
             .and_then(|(_, out)| match out {
-                HostOutcome::Completed(v) => v.get("filing_id").and_then(|x| x.as_str()).map(String::from),
+                HostOutcome::Completed(v) => v
+                    .get("filing_id")
+                    .and_then(|x| x.as_str())
+                    .map(String::from),
                 _ => None,
             })
             .unwrap_or_default();
@@ -691,7 +728,11 @@ fn execute(program: &OpProgram, host: &CorridorHost) -> ExecutionOutcome {
     ExecutionOutcome {
         trace,
         composed,
-        image_verdict: if admit { Verdict::Compliant } else { Verdict::NonCompliant },
+        image_verdict: if admit {
+            Verdict::Compliant
+        } else {
+            Verdict::NonCompliant
+        },
         final_status,
         registration_id,
     }
@@ -724,14 +765,8 @@ fn render_certificate(t_a: &Tensor, t_b: &Tensor, phi: Phi, outcome: &ExecutionO
         "domain", "source", "T_A", "T_B", "T_AB", "reason"
     );
     for e in &outcome.composed.entries {
-        let lhs = e
-            .t_a
-            .map(|v| v.as_str())
-            .unwrap_or("undefined");
-        let rhs = e
-            .t_b
-            .map(|v| v.as_str())
-            .unwrap_or("undefined");
+        let lhs = e.t_a.map(|v| v.as_str()).unwrap_or("undefined");
+        let rhs = e.t_b.map(|v| v.as_str()).unwrap_or("undefined");
         println!(
             "  {:<22} {:<24} {:<14} {:<14} {:<16} {}",
             e.domain,
@@ -745,7 +780,10 @@ fn render_certificate(t_a: &Tensor, t_b: &Tensor, phi: Phi, outcome: &ExecutionO
     let _ = t_a;
     let _ = t_b;
 
-    println!("image_verdict : {}", outcome.composed.image_verdict.as_str());
+    println!(
+        "image_verdict : {}",
+        outcome.composed.image_verdict.as_str()
+    );
     println!();
     println!("proof_bundle (step t_ab):");
     let translated: Vec<&str> = phi.map.keys().map(String::as_str).collect();
@@ -815,11 +853,7 @@ mod tests {
 
     #[test]
     fn admit_clean_tensors_compose_compliant() {
-        let host = CorridorHost::new(
-            adgm_tensor_clean(),
-            seychelles_tensor_clean(),
-            fetch_phi(),
-        );
+        let host = CorridorHost::new(adgm_tensor_clean(), seychelles_tensor_clean(), fetch_phi());
         let program = build_program();
         let outcome = execute(&program, &host);
         assert_eq!(outcome.composed.image_verdict, Verdict::Compliant);
@@ -849,11 +883,7 @@ mod tests {
 
     #[test]
     fn sharia_surfaces_as_not_applicable() {
-        let host = CorridorHost::new(
-            adgm_tensor_clean(),
-            seychelles_tensor_clean(),
-            fetch_phi(),
-        );
+        let host = CorridorHost::new(adgm_tensor_clean(), seychelles_tensor_clean(), fetch_phi());
         let program = build_program();
         let outcome = execute(&program, &host);
         let sharia = outcome
@@ -869,11 +899,7 @@ mod tests {
 
     #[test]
     fn tax_residency_carries_from_rhs_alone() {
-        let host = CorridorHost::new(
-            adgm_tensor_clean(),
-            seychelles_tensor_clean(),
-            fetch_phi(),
-        );
+        let host = CorridorHost::new(adgm_tensor_clean(), seychelles_tensor_clean(), fetch_phi());
         let program = build_program();
         let outcome = execute(&program, &host);
         let tr = outcome

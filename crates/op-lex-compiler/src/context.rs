@@ -112,22 +112,10 @@ impl PreludeBinding {
                 OpType::Bool,
                 PreludeLower::BinOp(BinOp::Eq),
             )
-            .add_callable(
-                "prelude.and",
-                OpType::Bool,
-                PreludeLower::BinOp(BinOp::And),
-            )
-            .add_callable(
-                "prelude.or",
-                OpType::Bool,
-                PreludeLower::BinOp(BinOp::Or),
-            )
+            .add_callable("prelude.and", OpType::Bool, PreludeLower::BinOp(BinOp::And))
+            .add_callable("prelude.or", OpType::Bool, PreludeLower::BinOp(BinOp::Or))
             .add_callable("prelude.not", OpType::Bool, PreludeLower::UnOp(UnOp::Not))
-            .add_callable(
-                "prelude.lt",
-                OpType::Bool,
-                PreludeLower::BinOp(BinOp::Lt),
-            )
+            .add_callable("prelude.lt", OpType::Bool, PreludeLower::BinOp(BinOp::Lt))
             .add_callable(
                 "prelude.contains",
                 OpType::Bool,

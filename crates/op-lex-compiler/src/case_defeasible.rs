@@ -25,7 +25,7 @@
 //! computational content as a `choose` over the guard sequence.
 
 use crate::ast::{LexException, LexTerm};
-use crate::case_match::fail_closed_expr;
+use crate::case_match::fail_closed_expr_for_type;
 use crate::context::CompileCtx;
 use crate::error::CompileError;
 use op_core::{MatchArm, OpExpr};
@@ -56,6 +56,7 @@ pub fn compile_defeasible(
     for exc in sorted.iter().rev() {
         let guard = compile_one(&exc.guard, ctx)?;
         let body = compile_one(&exc.body, ctx)?;
+        let catch_all = fail_closed_expr_for_type(&crate::infer_expr_type(&acc, ctx));
         acc = OpExpr::Match {
             scrutinee: Box::new(guard),
             arms: vec![
@@ -71,8 +72,8 @@ pub fn compile_defeasible(
                 },
             ],
             // Every boolean scrutinee is total on {true, false}; the
-            // catch-all is a defence-in-depth fail-closed verdict.
-            catch_all: Box::new(fail_closed_expr()),
+            // catch-all is a typed defence-in-depth value.
+            catch_all: Box::new(catch_all),
         };
     }
 

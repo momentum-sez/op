@@ -33,12 +33,13 @@
 //! be tracked.
 
 use op_core::{
-    CompensationClause, Contract, Contracts, Effect, FailureAction, GasBudget, OpExpr, OpProgram,
-    OpStep, OpType, Primitive, ProgramMetadata, Statement, StepBody, StepSignature, WaitSpec,
+    program_effect_row, CompensationClause, Contract, Contracts, Effect, FailureAction, GasBudget,
+    OpExpr, OpProgram, OpStep, OpType, Primitive, ProgramMetadata, Statement, StepBody,
+    StepSignature, WaitSpec,
 };
 use serde::{Deserialize, Serialize};
 use serde_yaml::Value as YamlValue;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
 
 /// Report emitted by a successful lowering pass.
@@ -76,6 +77,28 @@ pub enum LoweringError {
     #[error("unknown depends_on target: {0}")]
     UnknownDependency(String),
 
+    /// Step identifiers must be unique.
+    #[error("duplicate step id: {0}")]
+    DuplicateStepId(String),
+
+    /// `depends_on` must point to an earlier step because Op execution order is
+    /// the emitted linear statement order.
+    #[error("step '{step}' depends on '{dependency}', which is not earlier in source order")]
+    NonTopologicalDependency {
+        /// Step declaring the dependency.
+        step: String,
+        /// Dependency that does not precede it.
+        dependency: String,
+    },
+
+    /// A compensation clause targets no known forward step.
+    #[error("unknown compensation target: {0}")]
+    UnknownCompensationTarget(String),
+
+    /// A forward step may have at most one compensation clause.
+    #[error("duplicate compensation target: {0}")]
+    DuplicateCompensationTarget(String),
+
     /// Type-checking failed after successful lowering.
     #[error("type check failed after lowering: {errors:?}")]
     TypeCheckFailed {
@@ -101,17 +124,25 @@ pub fn lower_yaml(yaml: &str) -> Result<LoweringReport, LoweringError> {
         .and_then(YamlValue::as_sequence)
         .cloned()
         .unwrap_or_default();
-    let compensation_map = index_compensation(&doc, &mut warnings);
-
-    let mut body: Vec<Statement> = Vec::new();
     let known_ids: Vec<String> = steps_yaml
         .iter()
         .filter_map(|s| s.get("id").and_then(YamlValue::as_str))
         .map(|s| s.to_string())
         .collect();
+    validate_unique_step_ids(&known_ids)?;
+    let compensation_map = index_compensation(&doc, &known_ids, &mut warnings)?;
 
+    let mut body: Vec<Statement> = Vec::new();
+    let mut seen_ids = BTreeSet::new();
     for step_yaml in &steps_yaml {
-        let step = lower_step(step_yaml, &compensation_map, &known_ids, &mut warnings)?;
+        let step = lower_step(
+            step_yaml,
+            &compensation_map,
+            &known_ids,
+            &seen_ids,
+            &mut warnings,
+        )?;
+        seen_ids.insert(step.id.clone());
         body.push(Statement::Step(step));
     }
 
@@ -122,7 +153,7 @@ pub fn lower_yaml(yaml: &str) -> Result<LoweringReport, LoweringError> {
 
     let gas_budget = GasBudget::default();
 
-    let program = OpProgram {
+    let mut program = OpProgram {
         name,
         jurisdiction,
         metadata,
@@ -135,6 +166,7 @@ pub fn lower_yaml(yaml: &str) -> Result<LoweringReport, LoweringError> {
         body,
         gas_budget,
     };
+    program.effects = program_effect_row(&program);
 
     Ok(LoweringReport { program, warnings })
 }
@@ -193,6 +225,7 @@ fn lower_step(
     step: &YamlValue,
     compensation: &BTreeMap<String, CompensationClause>,
     known_ids: &[String],
+    seen_ids: &BTreeSet<String>,
     warnings: &mut Vec<String>,
 ) -> Result<OpStep, LoweringError> {
     let id = take_string(step, "id")?;
@@ -204,6 +237,12 @@ fn lower_step(
             if let Some(target) = d.as_str() {
                 if !known_ids.iter().any(|n| n == target) {
                     return Err(LoweringError::UnknownDependency(target.to_string()));
+                }
+                if !seen_ids.contains(target) {
+                    return Err(LoweringError::NonTopologicalDependency {
+                        step: id.clone(),
+                        dependency: target.to_string(),
+                    });
                 }
             }
         }
@@ -299,7 +338,10 @@ fn parse_failure_action(s: &str) -> Option<FailureAction> {
 
 fn compliance_domains_to_effects(step: &YamlValue, warnings: &mut Vec<String>) -> Vec<Effect> {
     let mut effects = Vec::new();
-    if let Some(doms) = step.get("compliance_domains").and_then(YamlValue::as_sequence) {
+    if let Some(doms) = step
+        .get("compliance_domains")
+        .and_then(YamlValue::as_sequence)
+    {
         for d in doms {
             if let Some(name) = d.as_str() {
                 match name.to_lowercase().as_str() {
@@ -336,14 +378,15 @@ fn yaml_value_to_expr(v: &YamlValue) -> OpExpr {
 
 fn index_compensation(
     doc: &YamlValue,
+    known_ids: &[String],
     warnings: &mut Vec<String>,
-) -> BTreeMap<String, CompensationClause> {
+) -> Result<BTreeMap<String, CompensationClause>, LoweringError> {
     let mut out = BTreeMap::new();
     let Some(comp) = doc.get("compensation") else {
-        return out;
+        return Ok(out);
     };
     let Some(steps) = comp.get("steps").and_then(YamlValue::as_sequence) else {
-        return out;
+        return Ok(out);
     };
     for s in steps {
         let forward = s
@@ -357,6 +400,12 @@ fn index_compensation(
             ));
             continue;
         };
+        if !known_ids.iter().any(|id| id == &forward) {
+            return Err(LoweringError::UnknownCompensationTarget(forward));
+        }
+        if out.contains_key(&forward) {
+            return Err(LoweringError::DuplicateCompensationTarget(forward));
+        }
         let primitive_name = s
             .get("type")
             .and_then(YamlValue::as_str)
@@ -388,7 +437,17 @@ fn index_compensation(
             },
         );
     }
-    out
+    Ok(out)
+}
+
+fn validate_unique_step_ids(ids: &[String]) -> Result<(), LoweringError> {
+    let mut seen = BTreeSet::new();
+    for id in ids {
+        if !seen.insert(id) {
+            return Err(LoweringError::DuplicateStepId(id.clone()));
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -452,9 +511,74 @@ steps:
     depends_on: [missing]
 "#;
         let err = lower_yaml(yaml).unwrap_err();
+        assert_eq!(err, LoweringError::UnknownDependency("missing".to_string()));
+    }
+
+    #[test]
+    fn forward_or_cyclic_depends_on_is_rejected() {
+        let yaml = r#"
+operation: broken.order
+jurisdiction: _default
+steps:
+  - id: a
+    type: document.board_minutes
+    depends_on: [b]
+  - id: b
+    type: document.board_minutes
+    depends_on: [a]
+"#;
+        let err = lower_yaml(yaml).unwrap_err();
         assert_eq!(
             err,
-            LoweringError::UnknownDependency("missing".to_string())
+            LoweringError::NonTopologicalDependency {
+                step: "a".to_string(),
+                dependency: "b".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn unknown_compensation_target_is_rejected() {
+        let yaml = r#"
+operation: broken.compensation
+jurisdiction: _default
+steps:
+  - id: activate
+    type: document.board_minutes
+compensation:
+  steps:
+    - id: typo
+      inverts: activte
+      type: document.board_minutes
+"#;
+        let err = lower_yaml(yaml).unwrap_err();
+        assert_eq!(
+            err,
+            LoweringError::UnknownCompensationTarget("activte".to_string())
+        );
+    }
+
+    #[test]
+    fn duplicate_compensation_target_is_rejected() {
+        let yaml = r#"
+operation: broken.duplicate-compensation
+jurisdiction: _default
+steps:
+  - id: activate
+    type: document.board_minutes
+compensation:
+  steps:
+    - id: c1
+      inverts: activate
+      type: document.board_minutes
+    - id: c2
+      inverts: activate
+      type: document.board_minutes
+"#;
+        let err = lower_yaml(yaml).unwrap_err();
+        assert_eq!(
+            err,
+            LoweringError::DuplicateCompensationTarget("activate".to_string())
         );
     }
 

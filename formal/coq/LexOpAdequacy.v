@@ -1,23 +1,22 @@
 (** * LexOpAdequacy.v
 
-    Top-level end-to-end adequacy theorem for the Lex -> Op
-    compilation on the admissible fragment.
+    Finite verdict-agreement core for the Lex -> Op compilation
+    skeleton.
 
     The paper's Section 7 states a verdict-preservation theorem up
     to weak bisimulation ([papers/op.tex §7.3, thm:verdict-preservation]).
-    [CompilationSoundness.v] discharges the nine per-case
-    preservation theorems (scalar constant, sanctions, variable,
-    record, list, variant, match, defeasible, hole-fill) and
-    [OpMetaTheory.v] lifts those into a single
-    [verdict_preservation_admissible] bidirectional statement.
+    [CompilationSoundness.v] discharges the nine per-case preservation
+    theorems (scalar constant, sanctions, variable, record, list,
+    variant, match, defeasible, hole-fill) and [OpMetaTheory.v] lifts
+    those into a single [verdict_preservation_admissible] bidirectional
+    statement over the deliberately finite model used there.
 
-    This file adds the top-level adequacy theorem that threads
-    those pieces through a compositional-bisimulation statement:
-    for every admissible Lex term [t], the Lex verdict relation
-    and the Op verdict relation on [admissible_compile t] agree
-    observationally.  This is the end-to-end adequacy-(b) claim
-    discussed in [papers/op.tex §7.5], stated concretely for the
-    admissible fragment.
+    This file packages that finite statement: for every term in the
+    current [admissible_lex] skeleton, the Lex verdict predicate and the
+    Op verdict predicate on [admissible_compile t] agree. It is not the
+    paper-level Lex denotational adequacy theorem, not reverse
+    operational completeness for Op proper, and not proof-relevant full
+    abstraction over compliance contexts.
 
     The theorem is Qed-closed, not [Admitted].  It does not rely
     on any new Axiom: the per-case Qed'd lemmas of
@@ -26,18 +25,17 @@
 
     The weak-bisimulation framework of [HeteroBisimulation.v] is
     the abstract setting; here we instantiate a concrete LTS whose
-    only observable is the emitted Lex verdict, and whose silent
-    step alphabet is empty on the admissible fragment (no [tau]
-    prefix is needed: each admissible case produces its verdict on
-    the single observable step).
+    only observable is the emitted Lex verdict. Direct cases produce
+    their verdict on a single observable step. The hole-fill case uses
+    the finite [tau] prefix proved by [fill_op_weak_verdict] after a
+    successful attestation append.
 
-    Important: this is the admissible-fragment adequacy.  The paper
-    makes a clear distinction between adequacy on the admissible
-    fragment (which is what we discharge here) and adequacy on the
-    full Lex calculus (which includes tribunal modals and temporal
-    coercions — rejected at the compilation boundary per
-    [papers/op.tex §7.1]).  The theorem here closes the admissible
-    boundary exactly, which is the paper's stated scope. *)
+    Important: this is a finite verdict-agreement core for the public
+    mechanization. The paper-level adequacy program remains broader:
+    it must range over the current [L_adm] fragment with compliance
+    contexts, then over the full Lex calculus, and it must account for
+    tribunal modals, temporal coercions, discretion-hole provenance,
+    Op-specific terminals, and proof-relevant observations. *)
 
 Set Implicit Arguments.
 
@@ -62,10 +60,9 @@ Definition adm_compiled (t : admissible_lex) (e : admissible_op) : Prop :=
 Definition verdict_alphabet : Type := admissible_verdict.
 
 (** Weak observational equivalence at verdicts: [t] and [e] emit
-    the same verdict on the observable single step.  On the
-    admissible fragment every case terminates in one observable
-    step (no silent prefix), so weak bisimulation collapses to
-    verdict-level agreement.  Cf.
+    the same verdict under the case-specific observation relation:
+    direct cases use the observable single step, and hole-fill uses
+    a finite silent prefix before the same observable verdict. Cf.
     [papers/op.tex def:weak-bisim] §7.3 and the logical-relations
     argument of [papers/op.tex §7.5]. *)
 Definition lex_op_verdict_agree
@@ -73,13 +70,12 @@ Definition lex_op_verdict_agree
   forall vv,
     admissible_lex_verdict t vv <-> admissible_op_verdict e vv.
 
-(** ** The top-level adequacy theorem *)
+(** ** The finite verdict-agreement theorem *)
 
-(** Statement: for every admissible Lex term [t], the compiled
-    Op expression [admissible_compile t] verdict-agrees with [t]
-    on every admissible verdict.  This is the compositional
-    bisimulation closure of the nine per-case preservation
-    theorems. *)
+(** Statement: for every skeleton Lex term [t], the compiled Op
+    expression [admissible_compile t] verdict-agrees with [t] on every
+    admissible verdict. This is the finite closure of the nine per-case
+    preservation theorems, not the full paper-level adequacy theorem. *)
 Theorem lex_op_adequacy :
   forall t : admissible_lex,
     lex_op_verdict_agree t (admissible_compile t).
@@ -88,15 +84,20 @@ Proof.
   exact (verdict_preservation_admissible t vv).
 Qed.
 
+(** Descriptive alias used by public proof-status text. The historical
+    theorem name [lex_op_adequacy] is retained for compatibility, while
+    this alias states the exact proof boundary. *)
+Theorem lex_op_finite_verdict_agreement :
+  forall t : admissible_lex,
+    lex_op_verdict_agree t (admissible_compile t).
+Proof. exact lex_op_adequacy. Qed.
+
 (** ** Compositional packaging
 
-    We also state the adequacy as a relation-level heterogeneous
-    weak bisimulation, specialized to the admissible fragment and
-    with empty silent-step alphabet.  The relation [adm_compiled]
-    witnesses the bisimilarity; [lex_op_adequacy_bisim] shows that
-    matching both forward and backward over the verdict alphabet
-    holds, which is the Park-style bisimulation clause restricted
-    to observable verdicts. *)
+    We also state the same finite agreement as a relation-level
+    package, specialized to [adm_compiled]. The theorem below gives the
+    two verdict directions for the finite alphabet; it is not a
+    coinductive weak bisimulation over Op's full transition system. *)
 
 Theorem lex_op_adequacy_bisim :
   forall (t : admissible_lex) (e : admissible_op),
@@ -114,6 +115,17 @@ Proof.
   - intros vv H. apply (verdict_preservation_admissible t vv). exact H.
   - intros vv H. apply (verdict_preservation_admissible t vv). exact H.
 Qed.
+
+Theorem lex_op_finite_verdict_agreement_bisim :
+  forall (t : admissible_lex) (e : admissible_op),
+    adm_compiled t e ->
+    (forall vv,
+       admissible_lex_verdict t vv ->
+       admissible_op_verdict e vv) /\
+    (forall vv,
+       admissible_op_verdict e vv ->
+       admissible_lex_verdict t vv).
+Proof. exact lex_op_adequacy_bisim. Qed.
 
 (** ** Compositional closure over admissible contexts
 
@@ -153,14 +165,14 @@ Proof.
   exact lex_op_adequacy_congruence.
 Qed.
 
-(** ** Observational injectivity (adequacy direction b)
+(** ** Observational injectivity on the finite skeleton
 
     If the compiled Op expressions of two admissible Lex terms
     yield the same verdict extensionally, then the Lex terms
     themselves yield the same verdict extensionally.  This is the
-    "no phantom observations" direction of adequacy: the Op
-    evaluator does not manufacture observations absent in the Lex
-    source. *)
+    "no phantom verdict" direction for the finite skeleton: compiled
+    Op verdict equality reflects Lex verdict equality. This is weaker
+    than reverse operational completeness for Op proper. *)
 Theorem lex_op_adequacy_injective :
   forall t1 t2 : admissible_lex,
     (forall vv, admissible_op_verdict (admissible_compile t1) vv <->
@@ -260,15 +272,15 @@ Proof.
   intros t1 t2 Heq vv. rewrite (Heq vv). reflexivity.
 Qed.
 
-(** ** End-to-end adequacy summary
+(** ** Finite verdict-agreement summary
 
-    [lex_op_adequacy] and [lex_op_adequacy_bisim] together
-    discharge the adequacy claim of [papers/op.tex §7.5] for the
-    admissible fragment.  The per-case preservation Qeds in
-    [CompilationSoundness.v] are the inductive cases; the
-    compositional bisimulation relation is [adm_compiled]; and the
-    bisimulation clauses collapse to verdict-level agreement by
-    the no-silent-step structure of the admissible reductions.
+    [lex_op_adequacy], [lex_op_adequacy_bisim], and their finite-named
+    aliases discharge the finite verdict-agreement core cited by the
+    papers. The per-case preservation Qeds in [CompilationSoundness.v]
+    are the inductive cases, and [adm_compiled] packages the compiled
+    relation at the verdict-predicate level.
 
-    No [Admitted.] or new [Axiom.] is introduced.  The closure is
-    direct: every theorem here has a Qed. *)
+    No [Admitted.] or new [Axiom.] is introduced. Full Lex/Op
+    adequacy, reverse operational completeness, compliance-context
+    adequacy, and proof-relevant full abstraction remain paper-level
+    obligations. *)

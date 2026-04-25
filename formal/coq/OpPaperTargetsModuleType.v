@@ -7,6 +7,12 @@ Require Import OpEffectMonotonicity.
 
 Set Implicit Arguments.
 
+(** This file supplies a concrete toy/core witness for the paper theorem
+    signatures. It is not the Op-proper metatheory: [Expr] below is the
+    small expression calculus from [OpProgressSubject], while full Op typing,
+    progress, preservation, effect monotonicity, and confluence remain in the
+    [formal/coq/Op/] milestone track. *)
+
 Inductive TerminalTag : Type :=
   | TValue
   | TPaused

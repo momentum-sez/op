@@ -9,6 +9,7 @@
 
 Require Import Coq.Lists.List.
 Require Import Coq.Arith.PeanoNat.
+Require Import Coq.Bool.Bool.
 
 Set Implicit Arguments.
 
@@ -269,3 +270,137 @@ Module CorridorMonotone (R : RuleExtension).
   Qed.
 
 End CorridorMonotone.
+
+(** ** Route-coherence checker over a normalized corridor snapshot
+
+    A multi-hop route can be compared with a direct corridor only after both
+    are normalized into a shared finite vocabulary.  At that point the
+    descent check is exactly equality of three finite surfaces:
+
+    - carried compliance cells;
+    - destination-side fresh-evaluation obligations;
+    - legal-instrument clauses.
+
+    The richer corridor semantics computes these snapshots.  This section
+    proves the checker core: once snapshots are normalized into canonical
+    list order, the Boolean checker is sound and complete for route
+    coherence. *)
+
+Definition nat_pair_eqb (p q : nat * nat) : bool :=
+  Nat.eqb (fst p) (fst q) && Nat.eqb (snd p) (snd q).
+
+Lemma nat_pair_eqb_eq :
+  forall p q, nat_pair_eqb p q = true -> p = q.
+Proof.
+  intros [a b] [c d] H.
+  unfold nat_pair_eqb in H. simpl in H.
+  apply andb_true_iff in H as [Ha Hb].
+  apply Nat.eqb_eq in Ha.
+  apply Nat.eqb_eq in Hb.
+  subst. reflexivity.
+Qed.
+
+Lemma nat_pair_eqb_refl :
+  forall p, nat_pair_eqb p p = true.
+Proof.
+  intros [a b]. unfold nat_pair_eqb. simpl.
+  rewrite !Nat.eqb_refl. reflexivity.
+Qed.
+
+Fixpoint list_eqb {A : Type} (eqb : A -> A -> bool)
+    (xs ys : list A) : bool :=
+  match xs, ys with
+  | nil, nil => true
+  | x :: xs', y :: ys' => eqb x y && list_eqb eqb xs' ys'
+  | _, _ => false
+  end.
+
+Lemma list_eqb_eq :
+  forall A (eqb : A -> A -> bool),
+    (forall x y, eqb x y = true -> x = y) ->
+    forall xs ys, list_eqb eqb xs ys = true -> xs = ys.
+Proof.
+  intros A eqb Heq xs.
+  induction xs as [|x xs IH]; intros ys H.
+  - destruct ys; simpl in H; [reflexivity | discriminate].
+  - destruct ys as [|y ys]; simpl in H; [discriminate |].
+    apply andb_true_iff in H as [Hxy Htail].
+    apply Heq in Hxy. subst y.
+    apply IH in Htail. subst ys.
+    reflexivity.
+Qed.
+
+Lemma list_eqb_refl :
+  forall A (eqb : A -> A -> bool),
+    (forall x, eqb x x = true) ->
+    forall xs, list_eqb eqb xs xs = true.
+Proof.
+  intros A eqb Hrefl xs.
+  induction xs as [|x xs IH]; simpl.
+  - reflexivity.
+  - rewrite Hrefl. rewrite IH. reflexivity.
+Qed.
+
+Record route_snapshot : Type := mk_route_snapshot {
+  carried_cells : list (nat * nat);
+  fresh_eval_domains : list nat;
+  instrument_clause_ids : list nat
+}.
+
+Definition route_snapshot_eqb (a b : route_snapshot) : bool :=
+  list_eqb nat_pair_eqb (carried_cells a) (carried_cells b) &&
+  list_eqb Nat.eqb (fresh_eval_domains a) (fresh_eval_domains b) &&
+  list_eqb Nat.eqb (instrument_clause_ids a) (instrument_clause_ids b).
+
+Definition route_coherent (direct staged : route_snapshot) : Prop :=
+  direct = staged.
+
+Theorem route_coherence_checker_sound :
+  forall direct staged,
+    route_snapshot_eqb direct staged = true ->
+    route_coherent direct staged.
+Proof.
+  intros [cc1 fe1 ic1] [cc2 fe2 ic2] H.
+  unfold route_snapshot_eqb in H. simpl in H.
+  apply andb_true_iff in H as [Hccfe Hic].
+  apply andb_true_iff in Hccfe as [Hcc Hfe].
+  apply list_eqb_eq in Hcc; [| apply nat_pair_eqb_eq].
+  apply list_eqb_eq in Hfe; [| intros x y Hy; apply Nat.eqb_eq; exact Hy].
+  apply list_eqb_eq in Hic; [| intros x y Hy; apply Nat.eqb_eq; exact Hy].
+  unfold route_coherent. subst. reflexivity.
+Qed.
+
+Theorem route_coherence_checker_complete :
+  forall direct staged,
+    route_coherent direct staged ->
+    route_snapshot_eqb direct staged = true.
+Proof.
+  intros direct staged H.
+  unfold route_coherent in H. subst staged.
+  destruct direct as [cc fe ic].
+  unfold route_snapshot_eqb. simpl.
+  rewrite (@list_eqb_refl (nat * nat)%type nat_pair_eqb nat_pair_eqb_refl cc).
+  rewrite (@list_eqb_refl nat Nat.eqb Nat.eqb_refl fe).
+  rewrite (@list_eqb_refl nat Nat.eqb Nat.eqb_refl ic).
+  reflexivity.
+Qed.
+
+Theorem route_coherence_checker_false_obstruction :
+  forall direct staged,
+    route_snapshot_eqb direct staged = false ->
+    ~ route_coherent direct staged.
+Proof.
+  intros direct staged Hfalse Hcoherent.
+  pose proof (route_coherence_checker_complete Hcoherent) as Htrue.
+  rewrite Htrue in Hfalse. discriminate.
+Qed.
+
+Theorem route_coherence_decidable :
+  forall direct staged,
+    { route_coherent direct staged } + { ~ route_coherent direct staged }.
+Proof.
+  intros direct staged.
+  destruct (route_snapshot_eqb direct staged) eqn:Hcheck.
+  - left. apply route_coherence_checker_sound. exact Hcheck.
+  - right. apply route_coherence_checker_false_obstruction. exact Hcheck.
+Qed.

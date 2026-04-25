@@ -167,15 +167,46 @@ rule logic — read it as a template.
 
 ## 8. What to read next
 
+The repository is organised in three layers; reading paths into each are
+distinct.
+
+**Executable — what the type checker accepts and what `cargo run` invokes:**
+
 - `docs/language-spec.md` — the full language reference.
 - `crates/op-core/src/types.rs` — the type checker.
-- `crates/op-core/src/effects.rs` — the effect-safety analyzer.
+- `crates/op-core/src/effects.rs` — the effect-safety analyser.
 - `crates/op-core/src/gas.rs` — the two-tier gas model.
 - `crates/op-compiler/src/lower.rs` — YAML → Op lowering.
 - `crates/op-stdlib/src/canonical.rs` — the canonical primitive corpus.
-- `formal/` — Coq and Lean scaffolds for the language semantics.
+- `crates/op-lex-compiler/` — the Lex→Op compilation function.
 
-The paper *Op: A Typed Bytecode for Compliance-Carrying Operations*
-describes the formal semantics, the conservation invariants, and the
-soundness property. Read it when you want the mathematics beneath the
-code.
+**Mechanized evidence — scoped Qed results and disclosed boundaries:**
+
+- `formal/coq/OpCore.v`, `formal/coq/OpMetaTheory.v` — base-sort scaffold
+  and admissible-fragment metatheory.
+- `formal/coq/{BSCInvariants,BundleAppendOnly,EffectRow,GasTermination,
+  OpEffectMonotonicity,OpProgressSubject}.v` — the five conservation
+  invariants.
+- `formal/coq/{CompilationSoundness,LexOpAdequacy,LexVerdictEmbedding,
+  UpToTauCompatibility}.v` — Lex→Op verdict preservation.
+- `formal/coq/{SessionCorridor,SessionDuality,MPSTProjection,
+  HeteroBisimulation}.v` — cross-zone replay and three-phase commit.
+- `formal/lean/OpCore.lean` — Lean mirror of the language scaffold.
+
+These files are evidence with named scope, not a blanket proof of Op proper.
+The closed Lex-to-Op result is verdict preservation for the admissible scalar
+skeleton. Several files intentionally declare `Parameter` or `Axiom` interfaces
+for host sanctions, prelude lookup, payloads, bundle append behavior, gas
+semantics, and hetero-bisimulation; `formal/coq/README.md` and the Op paper
+itemise the inventory.
+
+**Frontier — milestones declared but not yet closed:**
+
+- `formal/coq/Op/` — F-OP-FORMAL Tier-5 scaffolds; typing, progress,
+  preservation, and the compiler-correctness theorem are queued for later
+  milestones.
+
+The paper *Op: A Typed Bytecode for Compliance-Carrying Operations* at
+research.momentum.inc describes the formal semantics, the conservation
+invariants, and the soundness property. Read it when you want the mathematics
+beneath the code.

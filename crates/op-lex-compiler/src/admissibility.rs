@@ -20,22 +20,41 @@ use crate::ast::{LexBranch, LexTerm, LexValue};
 use crate::context::PreludeBinding;
 use crate::error::{AdmissibilityViolation, CompileError};
 use op_core::OpType;
+use std::collections::BTreeSet;
 
 /// Run the admissibility predicate over a term. Returns `Ok(())` when the
 /// term is admissible, otherwise returns a specific clause violation.
 pub fn check_admissible(term: &LexTerm, prelude: &PreludeBinding) -> Result<(), CompileError> {
+    check_admissible_with_binders(term, prelude, &BTreeSet::new())
+}
+
+fn check_admissible_with_binders(
+    term: &LexTerm,
+    prelude: &PreludeBinding,
+    binders: &BTreeSet<String>,
+) -> Result<(), CompileError> {
     match term {
         LexTerm::Const(v) => check_value_first_order(v),
 
-        LexTerm::Var { .. } => Ok(()),
+        LexTerm::Var { name, .. } => {
+            if prelude.lookup_value(name).is_some() || binders.contains(name) {
+                Ok(())
+            } else {
+                Err(CompileError::UnboundVariable { name: name.clone() })
+            }
+        }
 
         LexTerm::Match {
             scrutinee,
             branches,
         } => {
-            check_admissible(scrutinee, prelude)?;
+            check_admissible_with_binders(scrutinee, prelude, binders)?;
             for b in branches {
-                check_admissible(&b.body, prelude)?;
+                let mut branch_binders = binders.clone();
+                if !b.binder.is_empty() && b.binder != "_" {
+                    branch_binders.insert(b.binder.clone());
+                }
+                check_admissible_with_binders(&b.body, prelude, &branch_binders)?;
             }
             check_match_exhaustiveness(scrutinee, branches, prelude)
         }
@@ -43,7 +62,7 @@ pub fn check_admissible(term: &LexTerm, prelude: &PreludeBinding) -> Result<(), 
         LexTerm::Defeasible {
             base, exceptions, ..
         } => {
-            check_admissible(base, prelude)?;
+            check_admissible_with_binders(base, prelude, binders)?;
             // §6.2 defeasible rule requires `(priority DESC, source_position ASC)` to
             // be a total order on the exception set. Two exceptions sharing the same
             // `(priority, source_position)` leave resolution non-deterministic;
@@ -65,19 +84,21 @@ pub fn check_admissible(term: &LexTerm, prelude: &PreludeBinding) -> Result<(), 
                 }
             }
             for e in exceptions {
-                check_admissible(&e.guard, prelude)?;
-                check_admissible(&e.body, prelude)?;
+                check_admissible_with_binders(&e.guard, prelude, binders)?;
+                check_admissible_with_binders(&e.body, prelude, binders)?;
             }
             Ok(())
         }
 
-        LexTerm::SanctionsDominance { principal } => check_admissible(principal, prelude),
+        LexTerm::SanctionsDominance { principal } => {
+            check_admissible_with_binders(principal, prelude, binders)
+        }
 
-        LexTerm::HoleFill { value, .. } => check_admissible(value, prelude),
+        LexTerm::HoleFill { value, .. } => check_admissible_with_binders(value, prelude, binders),
 
         LexTerm::PreludeCall { callee, args } => {
             for a in args {
-                check_admissible(a, prelude)?;
+                check_admissible_with_binders(a, prelude, binders)?;
             }
             if prelude.lookup_callable(callee).is_none() {
                 return Err(CompileError::UnsupportedPreludeCall {
@@ -134,9 +155,7 @@ fn check_match_exhaustiveness(
         // that type has a finite registered constructor set.
         LexTerm::PreludeCall { callee, .. } => {
             prelude.lookup_callable(callee).and_then(|c| match &c.ty {
-                OpType::Variant(ctors) => {
-                    Some(ctors.iter().map(|(n, _)| n.clone()).collect())
-                }
+                OpType::Variant(ctors) => Some(ctors.iter().map(|(n, _)| n.clone()).collect()),
                 OpType::Bool => Some(vec!["true".to_string(), "false".to_string()]),
                 _ => None,
             })
@@ -153,7 +172,29 @@ fn check_match_exhaustiveness(
         });
     };
 
-    let have: std::collections::BTreeSet<_> = branches.iter().map(|b| b.tag.clone()).collect();
+    let required_lookup: std::collections::BTreeSet<_> = required.iter().cloned().collect();
+    let mut have = std::collections::BTreeSet::new();
+    for branch in branches {
+        if !required_lookup.contains(&branch.tag) {
+            return Err(CompileError::NotAdmissible {
+                reason: AdmissibilityViolation::ExhaustivenessUndecidable {
+                    loc: LexLoc::default(),
+                    detail: format!(
+                        "branch `{}` is not in the scrutinee constructor set",
+                        branch.tag
+                    ),
+                },
+            });
+        }
+        if !have.insert(branch.tag.clone()) {
+            return Err(CompileError::NotAdmissible {
+                reason: AdmissibilityViolation::ExhaustivenessUndecidable {
+                    loc: LexLoc::default(),
+                    detail: format!("duplicate branch for `{}`", branch.tag),
+                },
+            });
+        }
+    }
     for required_tag in &required {
         if !have.contains(required_tag) {
             return Err(CompileError::NotAdmissible {

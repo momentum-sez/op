@@ -101,9 +101,11 @@ fn main() {
 
     println!("== Sanctions-dominance example ======");
     let sanctions_term = LexTerm::sanctions_dominance_of(LexTerm::const_string("principal-X"));
-    let sanctions_prog =
-        compile_lex(&sanctions_term, &CompileCtx::with_canonical_prelude("demo.sanctions"))
-            .unwrap();
+    let sanctions_prog = compile_lex(
+        &sanctions_term,
+        &CompileCtx::with_canonical_prelude("demo.sanctions"),
+    )
+    .unwrap();
     print_program(&sanctions_prog);
     match run_program(&sanctions_prog, &host) {
         EvalResult::Value(v) => println!("execution value: {v}"),

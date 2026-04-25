@@ -1,8 +1,9 @@
 (** * Op/Semantics.v — Op small-step operational semantics (M-F1)
 
     Companion to [Op/Syntax.v]. Together they complete the M-F1
-    deliverable per `docs/architecture/frontier-work/F-OP-FORMAL.md`
-    in the kernel repository (Tier 5 of SUPREMUM/26).
+    deliverable: a small-step reduction relation over the call-by-value
+    core of Op, sufficient to support the typing, progress, and
+    preservation theorems queued for later milestones.
 
     ** Goal
 
@@ -150,9 +151,9 @@ Inductive step : OpExpr -> OpExpr -> Prop :=
         step e e' ->
         step (OE_Sequence (e :: rest)) (OE_Sequence (e' :: rest))
   | Step_Seq_Discard :
-      forall v rest,
+      forall v e rest,
         is_value v = true ->
-        step (OE_Sequence (v :: rest)) (OE_Sequence rest)
+        step (OE_Sequence (v :: e :: rest)) (OE_Sequence (e :: rest))
   | Step_Seq_Singleton :
       forall v,
         is_value v = true ->

@@ -1,9 +1,9 @@
-//! # op-lex-compiler — the compilation function `[[·]] : Lex -> Op`
+//! # op-lex-compiler — the compilation function `[[.]] : L_adm -> Op`
 //!
 //! Realizes the §6.2 compilation function from the Op paper as a running
-//! reference implementation. The compiler is total on the admissible
-//! fragment of Lex and rejects non-admissible inputs with a structured
-//! error pointing at the violated clause.
+//! reference implementation. The compiler is total on `L_adm`, the
+//! admissible fragment of Lex, and rejects non-admissible full-Lex inputs
+//! with a structured error pointing at the violated clause.
 //!
 //! ## Entry point
 //!
@@ -62,8 +62,8 @@ pub use context::{CompileCtx, Jurisdiction, PreludeBinding, PreludeCallable, Pre
 pub use error::{AdmissibilityViolation, CompileError};
 
 use op_core::{
-    ApprovalMode, BinOp, Contracts, Effect, MatchArm, OpExpr, OpProgram, OpType, ProgramMetadata,
-    Statement, UnOp,
+    typecheck_program, ApprovalMode, BinOp, Contracts, Effect, MatchArm, OpExpr, OpProgram, OpType,
+    ProgramMetadata, Statement, UnOp,
 };
 
 /// Compile an admissible Lex term into an Op program.
@@ -85,7 +85,14 @@ use op_core::{
 pub fn compile_lex(term: &LexTerm, ctx: &CompileCtx) -> Result<OpProgram, CompileError> {
     admissibility::check_admissible(term, &ctx.prelude)?;
     let body_expr = compile_expr(term, ctx)?;
-    Ok(build_program(body_expr, ctx))
+    let program = build_program(body_expr, ctx);
+    let typecheck = typecheck_program(&program);
+    if !typecheck.success {
+        return Err(CompileError::EmittedOpTypecheckFailed {
+            errors: typecheck.errors,
+        });
+    }
+    Ok(program)
 }
 
 /// Core expression-level compilation. Dispatches to the six case modules.
@@ -101,7 +108,10 @@ pub(crate) fn compile_expr(term: &LexTerm, ctx: &CompileCtx) -> Result<OpExpr, C
         } => {
             let compiled_scrutinee = compile_expr(scrutinee, ctx)?;
             let mut compile_one = |t: &LexTerm, c: &CompileCtx| compile_expr(t, c);
-            case_match::compile_match(compiled_scrutinee, branches, &mut compile_one, ctx)
+            let expr =
+                case_match::compile_match(compiled_scrutinee, branches, &mut compile_one, ctx)?;
+            ensure_match_arm_types(&expr, ctx)?;
+            Ok(expr)
         }
 
         LexTerm::Defeasible {
@@ -136,17 +146,17 @@ fn compile_prelude_call(
     args: &[LexTerm],
     ctx: &CompileCtx,
 ) -> Result<OpExpr, CompileError> {
-    let callable =
-        ctx.prelude
-            .lookup_callable(callee)
-            .ok_or_else(|| CompileError::UnsupportedPreludeCall {
-                name: callee.to_string(),
-            })?;
+    let callable = ctx.prelude.lookup_callable(callee).ok_or_else(|| {
+        CompileError::UnsupportedPreludeCall {
+            name: callee.to_string(),
+        }
+    })?;
 
     let compiled_args: Vec<OpExpr> = args
         .iter()
         .map(|a| compile_expr(a, ctx))
         .collect::<Result<Vec<_>, _>>()?;
+    validate_prelude_arg_types(callee, &callable.lower, &compiled_args, ctx)?;
 
     match &callable.lower {
         PreludeLower::BinOp(op) => match compiled_args.as_slice() {
@@ -174,6 +184,113 @@ fn compile_prelude_call(
     }
 }
 
+fn validate_prelude_arg_types(
+    callee: &str,
+    lower: &PreludeLower,
+    args: &[OpExpr],
+    ctx: &CompileCtx,
+) -> Result<(), CompileError> {
+    match lower {
+        PreludeLower::BinOp(op) => {
+            let [left, right] = args else {
+                return Ok(());
+            };
+            let left_ty = infer_expr_type(left, ctx);
+            let right_ty = infer_expr_type(right, ctx);
+            validate_binop_types(*op, &left_ty, &right_ty).map_err(|detail| {
+                CompileError::TypeMismatch {
+                    detail: format!("{callee}: {detail}"),
+                }
+            })
+        }
+        PreludeLower::UnOp(op) => {
+            let [arg] = args else {
+                return Ok(());
+            };
+            let ty = infer_expr_type(arg, ctx);
+            match op {
+                UnOp::Not if ty == OpType::Bool => Ok(()),
+                UnOp::Neg if ty == OpType::Int => Ok(()),
+                _ => Err(CompileError::TypeMismatch {
+                    detail: format!("{callee}: {op:?} expects a compatible operand, got {ty:?}"),
+                }),
+            }
+        }
+        PreludeLower::PrimitiveCall { .. }
+        | PreludeLower::ConstantLiteral(_)
+        | PreludeLower::FixedExpr(_) => Ok(()),
+    }
+}
+
+fn validate_binop_types(op: BinOp, left: &OpType, right: &OpType) -> Result<(), String> {
+    match op {
+        BinOp::And | BinOp::Or => require_binop_operands(op, left, right, &OpType::Bool),
+        BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge | BinOp::Add | BinOp::Sub | BinOp::Mul => {
+            require_binop_operands(op, left, right, &OpType::Int)
+        }
+        BinOp::Eq | BinOp::Ne => {
+            if left == right {
+                Ok(())
+            } else {
+                Err(format!(
+                    "{op:?} operands must have the same type, got {left:?} and {right:?}"
+                ))
+            }
+        }
+        BinOp::In => match right {
+            OpType::List(inner) if inner.as_ref() == left => Ok(()),
+            _ => Err(format!(
+                "In expects right operand List<{left:?}>, got {right:?}"
+            )),
+        },
+        BinOp::Contains => match left {
+            OpType::List(inner) if inner.as_ref() == right => Ok(()),
+            OpType::String if matches!(right, OpType::String) => Ok(()),
+            _ => Err(format!(
+                "Contains expects List<T>, T or String, String, got {left:?} and {right:?}"
+            )),
+        },
+    }
+}
+
+fn require_binop_operands(
+    op: BinOp,
+    left: &OpType,
+    right: &OpType,
+    expected: &OpType,
+) -> Result<(), String> {
+    if left == expected && right == expected {
+        Ok(())
+    } else {
+        Err(format!(
+            "{op:?} operands must both be {expected:?}, got {left:?} and {right:?}"
+        ))
+    }
+}
+
+fn ensure_match_arm_types(expr: &OpExpr, ctx: &CompileCtx) -> Result<(), CompileError> {
+    let OpExpr::Match { arms, .. } = expr else {
+        return Ok(());
+    };
+    let mut expected: Option<OpType> = None;
+    for arm in arms {
+        let ty = infer_expr_type(&arm.body, ctx);
+        if let Some(expected_ty) = &expected {
+            if expected_ty != &ty {
+                return Err(CompileError::TypeMismatch {
+                    detail: format!(
+                        "match arm `{}` has type {:?}, expected {:?}",
+                        arm.pattern, ty, expected_ty
+                    ),
+                });
+            }
+        } else {
+            expected = Some(ty);
+        }
+    }
+    Ok(())
+}
+
 /// Wrap a compiled expression into a full `OpProgram` whose body returns it.
 ///
 /// The emitted program advertises a single output field `result` whose type
@@ -188,7 +305,7 @@ fn build_program(body: OpExpr, ctx: &CompileCtx) -> OpProgram {
         jurisdiction: ctx.jurisdiction.0.clone(),
         metadata: ProgramMetadata {
             version: "0.1.0".to_string(),
-            description: "Compiled from Lex via [[.]] : Lex -> Op.".to_string(),
+            description: "Compiled from admissible Lex via [[.]] : L_adm -> Op.".to_string(),
         },
         inputs: vec![],
         outputs: vec![("result".to_string(), inferred_output)],
@@ -230,7 +347,11 @@ pub(crate) fn infer_expr_type(expr: &OpExpr, ctx: &CompileCtx) -> OpType {
                 .iter()
                 .map(|(name, e)| (name.clone(), infer_expr_type(e, ctx)))
                 .collect();
-            OpType::Record(inferred)
+            if is_encoded_variant_record(fields) {
+                OpType::Variant(vec![])
+            } else {
+                OpType::Record(inferred)
+            }
         }
         OpExpr::List(items) => {
             let inner = items
@@ -280,7 +401,9 @@ pub(crate) fn infer_expr_type(expr: &OpExpr, ctx: &CompileCtx) -> OpType {
         // Seq's type is the type of its second operand (F6 § canonical Seq).
         OpExpr::Seq(_a, b) => infer_expr_type(b, ctx),
         OpExpr::Field(_, _) => OpType::Record(vec![]),
-        OpExpr::Match { arms, catch_all, .. } => {
+        OpExpr::Match {
+            arms, catch_all, ..
+        } => {
             // Conservative: return the type of the first arm's body, falling
             // back to the catch-all. All arms + catch-all should share a
             // type by admissibility of the source Lex match.
@@ -294,12 +417,20 @@ pub(crate) fn infer_expr_type(expr: &OpExpr, ctx: &CompileCtx) -> OpType {
         },
         OpExpr::AssertSafety(_) => OpType::Unit,
         OpExpr::ConsumeLinear(inner) => infer_expr_type(inner, ctx),
-        OpExpr::Lock { resource, .. } => {
-            OpType::Locked(Box::new(infer_expr_type(resource, ctx)))
-        }
+        OpExpr::Lock { resource, .. } => OpType::Locked(Box::new(infer_expr_type(resource, ctx))),
         OpExpr::CommitTransfer { locked, .. } => infer_expr_type(locked, ctx),
         OpExpr::ReleaseLock { locked, .. } => infer_expr_type(locked, ctx),
     }
+}
+
+fn is_encoded_variant_record(fields: &[(String, OpExpr)]) -> bool {
+    matches!(
+        fields,
+        [
+            (tag_name, OpExpr::String(_)),
+            (value_name, _)
+        ] if tag_name == "tag" && value_name == "value"
+    )
 }
 
 /// Infer the program-level effect row from the body. Conservative: emits
@@ -319,6 +450,7 @@ fn walk_effects(expr: &OpExpr, acc: &mut std::collections::BTreeSet<Effect>) {
             match name.as_str() {
                 "sanctions.check" => {
                     acc.insert(Effect::SanctionsCheck);
+                    acc.insert(Effect::ExternalRead);
                 }
                 "attestation.append" => {
                     acc.insert(Effect::ProofEmit);
@@ -426,8 +558,7 @@ mod tests {
     #[test]
     fn sanctions_dominance_emits_call() {
         let ctx = CompileCtx::with_canonical_prelude("demo.sanctions");
-        let term =
-            LexTerm::sanctions_dominance_of(LexTerm::const_string("entity-0xDEADBEEF"));
+        let term = LexTerm::sanctions_dominance_of(LexTerm::const_string("entity-0xDEADBEEF"));
         let program = compile_lex(&term, &ctx).unwrap();
         match &program.body[0] {
             Statement::Return(OpExpr::Call(name, args)) => {
@@ -435,6 +566,7 @@ mod tests {
                 assert_eq!(args.len(), 1);
                 assert_eq!(args[0].0, "principal");
                 assert!(program.effects.contains(&Effect::SanctionsCheck));
+                assert!(program.effects.contains(&Effect::ExternalRead));
             }
             other => panic!("expected sanctions call, got {other:?}"),
         }
@@ -519,17 +651,14 @@ mod tests {
     }
 
     #[test]
-    fn seq_preserves_value_type_under_attestation_failure() {
-        // F6: attestation.append in a Seq position must not abort the Seq
-        // when the host errors on that call. The value operand carries the
-        // result. This is the §6.3 τ-labelled bisimulation case.
+    fn seq_rejects_value_under_attestation_failure() {
+        // F6: attestation.append is tau-labelled only when persistence
+        // succeeds. If the proof-bundle append fails, the filled value must
+        // not be accepted.
         use op_core::host::{HostError, HostOutcome, OpHost, PrimitiveCall};
         struct FailingProofHost;
         impl OpHost for FailingProofHost {
-            fn invoke(
-                &self,
-                call: &PrimitiveCall,
-            ) -> Result<HostOutcome, HostError> {
+            fn invoke(&self, call: &PrimitiveCall) -> Result<HostOutcome, HostError> {
                 if call.primitive.0 == "attestation.append" {
                     return Err(HostError::Transient(
                         "proof bundle writer offline".to_string(),
@@ -552,14 +681,112 @@ mod tests {
         let host = FailingProofHost;
         match run_program(&program, &host) {
             crate::interp::EvalResult::Value(v) => {
-                // The value operand is still returned even though the
-                // attestation call failed.
-                assert_eq!(v, serde_json::Value::from(5));
+                panic!("attestation failure returned value: {v:?}")
             }
             crate::interp::EvalResult::Error(e) => {
-                panic!("Seq aborted on attestation failure; got: {e}")
+                assert!(e.contains("proof bundle writer offline"));
             }
         }
+    }
+
+    #[test]
+    fn callable_name_as_var_is_rejected() {
+        let ctx = CompileCtx::with_canonical_prelude("demo.callable-var");
+        let result = compile_lex(&LexTerm::var("sanctions.check", 0), &ctx);
+        assert!(matches!(result, Err(CompileError::UnboundVariable { .. })));
+    }
+
+    #[test]
+    fn match_duplicate_and_extra_branches_are_rejected() {
+        let ctx = CompileCtx::with_canonical_prelude("demo.match");
+        let duplicate = LexTerm::Match {
+            scrutinee: Box::new(LexTerm::const_bool(true)),
+            branches: vec![
+                LexBranch {
+                    tag: "true".to_string(),
+                    binder: "_".to_string(),
+                    body: LexTerm::const_bool(true),
+                },
+                LexBranch {
+                    tag: "true".to_string(),
+                    binder: "_".to_string(),
+                    body: LexTerm::const_bool(false),
+                },
+                LexBranch {
+                    tag: "false".to_string(),
+                    binder: "_".to_string(),
+                    body: LexTerm::const_bool(false),
+                },
+            ],
+        };
+        let err = compile_lex(&duplicate, &ctx).unwrap_err();
+        assert!(matches!(
+            err,
+            CompileError::NotAdmissible {
+                reason: AdmissibilityViolation::ExhaustivenessUndecidable { .. }
+            }
+        ));
+
+        let extra = LexTerm::Match {
+            scrutinee: Box::new(LexTerm::const_bool(true)),
+            branches: vec![
+                LexBranch {
+                    tag: "true".to_string(),
+                    binder: "_".to_string(),
+                    body: LexTerm::const_bool(true),
+                },
+                LexBranch {
+                    tag: "false".to_string(),
+                    binder: "_".to_string(),
+                    body: LexTerm::const_bool(false),
+                },
+                LexBranch {
+                    tag: "maybe".to_string(),
+                    binder: "_".to_string(),
+                    body: LexTerm::const_bool(false),
+                },
+            ],
+        };
+        let err = compile_lex(&extra, &ctx).unwrap_err();
+        assert!(matches!(
+            err,
+            CompileError::NotAdmissible {
+                reason: AdmissibilityViolation::ExhaustivenessUndecidable { .. }
+            }
+        ));
+    }
+
+    #[test]
+    fn prelude_and_rejects_integer_operands() {
+        let ctx = CompileCtx::with_canonical_prelude("demo.bad-and");
+        let term = LexTerm::PreludeCall {
+            callee: "prelude.and".to_string(),
+            args: vec![LexTerm::const_int(1), LexTerm::const_int(2)],
+        };
+        let err = compile_lex(&term, &ctx).unwrap_err();
+        assert!(matches!(err, CompileError::TypeMismatch { .. }));
+    }
+
+    #[test]
+    fn match_mixed_result_types_are_rejected() {
+        let ctx = CompileCtx::with_canonical_prelude("demo.mixed-match");
+        let term = LexTerm::Match {
+            scrutinee: Box::new(LexTerm::const_bool(true)),
+            branches: vec![
+                LexBranch {
+                    tag: "true".to_string(),
+                    binder: "_".to_string(),
+                    body: LexTerm::const_int(1),
+                },
+                LexBranch {
+                    tag: "false".to_string(),
+                    binder: "_".to_string(),
+                    body: LexTerm::const_bool(false),
+                },
+            ],
+        };
+        let err = compile_lex(&term, &ctx).unwrap_err();
+        assert!(matches!(err, CompileError::TypeMismatch { .. }));
     }
 
     #[test]

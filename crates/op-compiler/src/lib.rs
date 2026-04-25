@@ -58,10 +58,7 @@ pub fn compile_yaml(yaml: &str) -> Result<CompiledProgram, LoweringError> {
             .as_ref()
             .map(|g| g.structural_bound)
             .unwrap_or(0),
-        extensional_gas_bound: tc
-            .gas_analysis
-            .as_ref()
-            .and_then(|g| g.max_extensional_gas),
+        extensional_gas_bound: tc.gas_analysis.as_ref().and_then(|g| g.max_extensional_gas),
         needs_cardinality_cert: tc
             .gas_analysis
             .as_ref()
@@ -72,7 +69,7 @@ pub fn compile_yaml(yaml: &str) -> Result<CompiledProgram, LoweringError> {
     Ok(CompiledProgram {
         program: report.program,
         content_address,
-        safety_verified: tc.failed_predicates.is_empty(),
+        safety_verified: tc.failed_predicates.is_empty() && tc.deferred_predicates.is_empty(),
         type_check: tc,
         gas_estimate,
     })
@@ -96,7 +93,7 @@ params:
   optional: []
 steps:
   - id: noop
-    type: noop.primitive
+    type: document.board_minutes
     compliance_domains: []
 "#;
 

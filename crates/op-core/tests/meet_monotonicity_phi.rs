@@ -229,7 +229,11 @@ fn non_identity_phi_can_produce_different_composite_than_identity() {
     // differs from its φ-composite. Without this, the non-identity case
     // would be vacuous. The witness locks in that the paper's extended
     // claim is non-degenerate.
-    let t_a = tensor(Verdict::Compliant, Verdict::SanctionsBlocked, Verdict::Compliant);
+    let t_a = tensor(
+        Verdict::Compliant,
+        Verdict::SanctionsBlocked,
+        Verdict::Compliant,
+    );
     let t_b = tensor(
         Verdict::SanctionsBlocked,
         Verdict::Compliant,

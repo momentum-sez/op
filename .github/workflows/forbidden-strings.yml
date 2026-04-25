@@ -1,0 +1,59 @@
+name: forbidden-strings
+
+# Enforces public-artifact hygiene from CLAUDE.md: no local-machine paths,
+# no path dependencies outside the repository, and no non-whitelisted
+# GitHub repository URLs.
+
+on:
+  push:
+    branches: [main, master, develop]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  forbidden-strings:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: scan for closed-repository references
+        run: |
+          set -euo pipefail
+          patterns=(
+            '/Users/[^/]+/'
+            '/home/[^/]+/'
+            '/private/tmp/'
+            'file://'
+            'path[[:space:]]*=[[:space:]]*"\.\./'
+            'git[+]ssh://'
+          )
+          fail=0
+          for p in "${patterns[@]}"; do
+            matches=$(git grep -nE "$p" -- \
+              ':(exclude)CLAUDE.md' \
+              ':(exclude)SUPREMUM-DISCIPLINE.md' \
+              ':(exclude).github/workflows/forbidden-strings.yml' \
+              ':(exclude)Cargo.lock' \
+              || true)
+            if [ -n "$matches" ]; then
+              echo "::error::forbidden-strings matched pattern: $p"
+              echo "$matches"
+              fail=1
+            fi
+          done
+          if [ "$fail" -ne 0 ]; then
+            echo ""
+            echo "Forbidden local/private references detected in public files."
+            echo "See CLAUDE.md public-artifact hygiene policy."
+            exit 1
+          fi
+          non_whitelist=$(git grep -nE 'https://github\.com/|git@github\.com:' -- \
+            ':(exclude).github/workflows/forbidden-strings.yml' \
+            ':(exclude)Cargo.lock' \
+            | grep -Ev 'github\.com[/:]momentum-sez/(lex|op|gstore|stack)(\.git)?([/#?[:space:]]|$)' \
+            || true)
+          if [ -n "$non_whitelist" ]; then
+            echo "::error::non-whitelisted GitHub repository URL"
+            echo "$non_whitelist"
+            exit 1
+          fi
+          echo "No forbidden strings detected."

@@ -387,6 +387,40 @@ Proof.
   apply cell_meet_sanctioned_left.
 Qed.
 
+(** Sanctions-bottom non-bypass: once either side contributes
+    [CC_Sanctioned] at a coordinate, context meet cannot report that
+    coordinate as [CC_Compliant]. This is the context-algebra core of
+    the one-bit sanctions IFC boundary; it does not mention traces,
+    witnesses, or declassification. *)
+Theorem sanctions_bottom_cannot_become_compliant_after_meet :
+  forall k1 k2 c v,
+    clookup k1 c = Some CC_Sanctioned \/
+    clookup k2 c = Some CC_Sanctioned ->
+    clookup (context_meet k1 k2) c = Some v ->
+    v <> CC_Compliant.
+Proof.
+  intros k1 k2 c v Hbottom Hlookup Heq.
+  subst v.
+  pose proof (sanctions_absorption_in_meet k1 k2 c Hbottom) as Hsan.
+  rewrite Hlookup in Hsan.
+  discriminate.
+Qed.
+
+(** Rank form of the same non-bypass fact: a sanctions-bottom
+    coordinate in either input forces rank zero at the met coordinate. *)
+Theorem sanctions_bottom_forces_rank_zero_after_meet :
+  forall k1 k2 c v,
+    clookup k1 c = Some CC_Sanctioned \/
+    clookup k2 c = Some CC_Sanctioned ->
+    clookup (context_meet k1 k2) c = Some v ->
+    cell_rank v = cell_rank CC_Sanctioned.
+Proof.
+  intros k1 k2 c v Hbottom Hlookup.
+  pose proof (sanctions_absorption_in_meet k1 k2 c Hbottom) as Hsan.
+  rewrite Hlookup in Hsan.
+  inversion Hsan. reflexivity.
+Qed.
+
 (** ** Further structural properties (2026-04-20) *)
 
 (** Decidable equality on the cell verdict. *)

@@ -10,10 +10,11 @@
 //! ```
 //!
 //! The catch-all arm is materialized explicitly so the Op `Match` is total on
-//! values. Fail-closed in this context means: return a `NonCompliant` verdict
-//! tagged with the reason `"pattern_unmatched"`. Admissibility has already
-//! decided the match is exhaustive — the catch-all is purely defence-in-depth
+//! values. Admissibility has already decided the match is exhaustive — the
+//! catch-all is a typed defence-in-depth inhabitant of the branch result type
 //! against runtime-observed constructors not present in the compile-time type.
+//! Verdict-valued matches use the canonical `NonCompliant` verdict tagged with
+//! the reason `"pattern_unmatched"`.
 //!
 //! Each branch is compiled under a context extended with the branch's
 //! constructor-payload binders. The admissible fragment's nullary
@@ -48,7 +49,11 @@ pub fn compile_match(
             body,
         });
     }
-    let catch_all = fail_closed_expr();
+    let result_ty = arms
+        .first()
+        .map(|arm| crate::infer_expr_type(&arm.body, ctx))
+        .unwrap_or(OpType::Unit);
+    let catch_all = fail_closed_expr_for_type(&result_ty);
     Ok(OpExpr::Match {
         scrutinee: Box::new(scrutinee),
         arms,
@@ -74,7 +79,10 @@ fn binders_for_branch(b: &LexBranch) -> Vec<(String, OpType)> {
 /// compatible with the canonical prelude's `Verdict` variant.
 pub fn fail_closed_expr() -> OpExpr {
     OpExpr::Record(vec![
-        ("tag".to_string(), OpExpr::String("NonCompliant".to_string())),
+        (
+            "tag".to_string(),
+            OpExpr::String("NonCompliant".to_string()),
+        ),
         (
             "value".to_string(),
             OpExpr::Record(vec![(
@@ -83,4 +91,31 @@ pub fn fail_closed_expr() -> OpExpr {
             )]),
         ),
     ])
+}
+
+/// Typed defense-in-depth catch-all for an already-exhaustive match.
+///
+/// The admissibility gate proves the catch-all unreachable for the registered
+/// constructor set. The emitted Op still materializes a branch, so its value
+/// must inhabit the same result type as the real arms.
+pub fn fail_closed_expr_for_type(ty: &OpType) -> OpExpr {
+    match ty {
+        OpType::Unit => OpExpr::Unit,
+        OpType::Bool => OpExpr::Bool(false),
+        OpType::Int => OpExpr::Int(0),
+        OpType::String => OpExpr::String("pattern_unmatched".to_string()),
+        OpType::Record(fields) => OpExpr::Record(
+            fields
+                .iter()
+                .map(|(name, field_ty)| (name.clone(), fail_closed_expr_for_type(field_ty)))
+                .collect(),
+        ),
+        OpType::Variant(_) => fail_closed_expr(),
+        OpType::List(_) => OpExpr::List(vec![]),
+        OpType::Option(_) => OpExpr::Null,
+        OpType::Tuple(items) => {
+            OpExpr::Tuple(items.iter().map(fail_closed_expr_for_type).collect())
+        }
+        _ => OpExpr::Unit,
+    }
 }
