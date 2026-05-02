@@ -1,0 +1,25 @@
+# Rust / Cargo
+target/
+Cargo.lock.bak
+*.rs.bk
+
+# OS
+.DS_Store
+
+# Coq / Rocq compiled artifacts (should not be tracked; built by CI and by
+# `coqc` locally from the .v sources)
+*.vo
+*.vok
+*.vos
+*.glob
+.*.aux
+formal/coq/CoqMakefile
+formal/coq/CoqMakefile.conf
+formal/coq/.CoqMakefile.d
+formal/coq/.Makefile.d
+.lia.cache
+.nia.cache
+
+# Editor
+*.swp
+*~

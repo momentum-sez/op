@@ -1,0 +1,39 @@
+# Op formal Coq build manifest.
+# Files ordered to respect cross-file dependencies; stdlib deps are
+# handled implicitly.
+
+# Leaf files (no intra-op dependencies).
+BSCInvariants.v
+BundleAppendOnly.v
+CanonicalEncoding.v
+CompilationSoundness.v
+ComplianceContext.v
+CorridorMonotone.v
+EffectRow.v
+GasTermination.v
+HeteroBisimulation.v
+MPSTProjection.v
+OpConcreteAST.v
+OpCore.v
+OpEffectMonotonicity.v
+OpPaperTargets.v
+OpProgressSubject.v
+SessionCorridor.v
+SessionDuality.v
+UpToTauCompatibility.v
+WireFormatVerifier.v
+
+# Dependent files (Require other op files).
+CaseStudyADGMDIFC.v
+LexVerdictEmbedding.v
+OpMetaTheory.v
+OpPaperTargetsInstance.v
+OpPaperTargetsModuleType.v
+UpToTauCounterexample.v
+LexOpAdequacy.v
+
+# F-OP-FORMAL — Op/ subdir (M-F1 scaffold: syntax + semantics).
+# Build these with: coqc -Q Op Op Op/Syntax.v Op/Semantics.v
+-Q Op Op
+Op/Syntax.v
+Op/Semantics.v

@@ -1,0 +1,406 @@
+(** * Corridor-history monotonicity for Op BSC typing *)
+
+(** This file states the corridor-history monotonicity lemma of
+    [Op] paper lem:kappa-monotone as a Rocq development.  The lemma
+    is the preservation witness for the SJN invariants (I1)-(I3) by
+    typing: every BSC typing rule (T-Lock, T-Sign, T-Verify, T-Blame,
+    T-Lock-Timeout) extends kappa additively, never weakening any
+    cell. *)
+
+Require Import Coq.Lists.List.
+Require Import Coq.Arith.PeanoNat.
+Require Import Coq.Bool.Bool.
+
+Set Implicit Arguments.
+
+(** A corridor-history coordinate names a side X (Initiator or
+    Responder), an operation index omega, and an epoch index epsilon,
+    plus a kind discriminating the four cell families. *)
+Inductive side : Type := Initiator | Responder.
+
+Inductive coord_kind : Type :=
+  | ActiveLock      (** active_lock_X(omega, epsilon) := deadline *)
+  | HistoryOf       (** history_of_X(omega, epsilon) := digest *)
+  | Verified        (** verified_X(omega, epsilon)   := {s_A, s_B} *)
+  | Blame.          (** blame_X(omega, epsilon, Z)   := {s_1, s_2} *)
+
+Definition coord : Type := side * coord_kind * nat * nat.
+
+(** Corridor history is a finite partial map from coord to a
+    polymorphic value type.  We model it as an association list
+    with the convention that earlier entries shadow later ones
+    (equivalent to a finite map). *)
+Definition kappa (V : Type) : Type := list (coord * V).
+
+(** Decidable equality on coord built up from components. *)
+Lemma side_eq_dec : forall s1 s2 : side, {s1 = s2} + {s1 <> s2}.
+Proof. decide equality. Defined.
+
+Lemma coord_kind_eq_dec : forall k1 k2 : coord_kind, {k1 = k2} + {k1 <> k2}.
+Proof. decide equality. Defined.
+
+Lemma coord_eq_dec : forall c1 c2 : coord, {c1 = c2} + {c1 <> c2}.
+Proof.
+  intros [[[s1 k1] o1] e1] [[[s2 k2] o2] e2].
+  destruct (side_eq_dec s1 s2); [| right; congruence].
+  destruct (coord_kind_eq_dec k1 k2); [| right; congruence].
+  destruct (Nat.eq_dec o1 o2); [| right; congruence].
+  destruct (Nat.eq_dec e1 e2); [| right; congruence].
+  subst. left. reflexivity.
+Defined.
+
+(** Lookup. *)
+Fixpoint lookup {V : Type} (k : kappa V) (c : coord) : option V :=
+  match k with
+  | nil => None
+  | (c', v) :: k' =>
+      if coord_eq_dec c c' then Some v else lookup k' c
+  end.
+
+(** Subset order: kappa1 sqsubseteq kappa2 iff every cell in
+    kappa1 is also in kappa2 with the same value. *)
+Definition kappa_sub {V : Type} (k1 k2 : kappa V) : Prop :=
+  forall c v, lookup k1 c = Some v -> lookup k2 c = Some v.
+
+(** Reflexivity. *)
+Lemma kappa_sub_refl : forall V (k : kappa V), kappa_sub k k.
+Proof.
+  intros V k c v H. exact H.
+Qed.
+
+(** Transitivity. *)
+Lemma kappa_sub_trans : forall V (k1 k2 k3 : kappa V),
+  kappa_sub k1 k2 -> kappa_sub k2 k3 -> kappa_sub k1 k3.
+Proof.
+  intros V k1 k2 k3 H12 H23 c v H1.
+  apply H23. apply H12. exact H1.
+Qed.
+
+(** Additive extension: cons preserves and extends sub. *)
+Lemma kappa_sub_cons :
+  forall V (k : kappa V) c v,
+    lookup k c = None ->
+    kappa_sub k ((c, v) :: k).
+Proof.
+  intros V k c v Hnone c' v' Hlk.
+  simpl. destruct (coord_eq_dec c' c) as [Heq | Hneq].
+  - subst c'. rewrite Hnone in Hlk. discriminate.
+  - exact Hlk.
+Qed.
+
+(** A typing-rule output extension: every rule emits a fresh cell. *)
+Definition extends_with {V : Type} (k k' : kappa V) (c : coord) (v : V) : Prop :=
+  k' = (c, v) :: k /\ lookup k c = None.
+
+Lemma extends_with_implies_sub :
+  forall V (k k' : kappa V) c v,
+    extends_with k k' c v -> kappa_sub k k'.
+Proof.
+  intros V k k' c v [Hk' Hnone]. subst k'.
+  apply kappa_sub_cons. exact Hnone.
+Qed.
+
+(** ** Additional kappa_sub properties *)
+
+(** The empty kappa is a subset of every kappa. *)
+Lemma kappa_sub_empty : forall V (k : kappa V),
+  kappa_sub (@nil (coord * V)) k.
+Proof.
+  intros V k c v H. simpl in H. discriminate.
+Qed.
+
+(** If [k1 ⊑ k2], then prepending the same cell on both preserves
+    the sub relation (provided the new coord is fresh in both). *)
+Lemma kappa_sub_cons_cong :
+  forall V (k1 k2 : kappa V) c v,
+    kappa_sub k1 k2 ->
+    kappa_sub ((c, v) :: k1) ((c, v) :: k2).
+Proof.
+  intros V k1 k2 c v Hsub c' v' Hlk.
+  simpl in *.
+  destruct (coord_eq_dec c' c) as [Heq | Hneq].
+  - exact Hlk.
+  - apply Hsub. exact Hlk.
+Qed.
+
+(** An extended kappa contains the extension cell. *)
+Lemma extends_with_contains_cell :
+  forall V (k k' : kappa V) c v,
+    extends_with k k' c v ->
+    lookup k' c = Some v.
+Proof.
+  intros V k k' c v [Hk' Hnone]. subst k'. simpl.
+  destruct (coord_eq_dec c c) as [_ | Hne]; [reflexivity | contradiction].
+Qed.
+
+(** Two consecutive extensions yield a sub chain from the initial
+    kappa to the final kappa. *)
+Lemma extends_with_chain_implies_sub :
+  forall V (k1 k2 k3 : kappa V) c2 v2 c3 v3,
+    extends_with k1 k2 c2 v2 ->
+    extends_with k2 k3 c3 v3 ->
+    kappa_sub k1 k3.
+Proof.
+  intros V k1 k2 k3 c2 v2 c3 v3 H12 H23.
+  apply kappa_sub_trans with (k2 := k2).
+  - eapply extends_with_implies_sub. exact H12.
+  - eapply extends_with_implies_sub. exact H23.
+Qed.
+
+(** If the same coord maps to two different values in two related
+    kappas under [kappa_sub], that's impossible: values agree. *)
+Lemma kappa_sub_lookup_functional :
+  forall V (k1 k2 : kappa V) c v1 v2,
+    kappa_sub k1 k2 ->
+    lookup k1 c = Some v1 ->
+    lookup k2 c = Some v2 ->
+    v1 = v2.
+Proof.
+  intros V k1 k2 c v1 v2 Hsub Hl1 Hl2.
+  apply Hsub in Hl1. rewrite Hl1 in Hl2. inversion Hl2. reflexivity.
+Qed.
+
+(** The corridor-history monotonicity lemma, stated abstractly:
+    every typing-rule reduction extends kappa.  The actual rule
+    inductive (T-Lock, T-Sign, T-Verify, T-Blame, T-Lock-Timeout)
+    is parameterized; the user supplies the per-rule extension
+    proofs. *)
+(** ** Additional lookup / extension structural lemmas (2026-04-20) *)
+
+(** Lookup on the empty kappa is always [None]. *)
+Lemma lookup_nil : forall V c, lookup (@nil (coord * V)) c = None.
+Proof. reflexivity. Qed.
+
+(** Lookup on a cons whose head matches returns [Some v]. *)
+Lemma lookup_cons_match :
+  forall V (k : kappa V) c v, lookup ((c, v) :: k) c = Some v.
+Proof.
+  intros V k c v. simpl.
+  destruct (coord_eq_dec c c) as [_|Hne]; [reflexivity | contradiction].
+Qed.
+
+(** Lookup on a cons whose head does not match recurses. *)
+Lemma lookup_cons_nomatch :
+  forall V (k : kappa V) c c' v,
+    c <> c' -> lookup ((c', v) :: k) c = lookup k c.
+Proof.
+  intros V k c c' v Hne. simpl.
+  destruct (coord_eq_dec c c') as [Heq|_]; [contradiction | reflexivity].
+Qed.
+
+(** An extension preserves old entries: if [lookup k c = Some v], the
+    extension [(c', v') :: k] also returns [Some v] at [c] (assuming
+    [c <> c']). *)
+Lemma extension_preserves_lookup :
+  forall V (k : kappa V) c c' v v',
+    c <> c' ->
+    lookup k c = Some v ->
+    lookup ((c', v') :: k) c = Some v.
+Proof.
+  intros V k c c' v v' Hne Hl.
+  rewrite lookup_cons_nomatch; [exact Hl | exact Hne].
+Qed.
+
+(** If [c] has [None] in both k1 and k2, and kappa_sub holds, then
+    the [None] is preserved. *)
+Lemma kappa_sub_preserves_absent :
+  forall V (k1 k2 : kappa V) c,
+    kappa_sub k1 k2 ->
+    lookup k1 c = None ->
+    (forall v, lookup k1 c <> Some v).
+Proof.
+  intros V k1 k2 c _ Hnone v Hsome. rewrite Hnone in Hsome. discriminate.
+Qed.
+
+Module Type RuleExtension.
+  Parameter V : Type.
+  Parameter rule_step : kappa V -> kappa V -> Prop.
+
+  Axiom rule_step_extends :
+    forall k k', rule_step k k' ->
+      k = k' \/ exists c v, extends_with k k' c v.
+End RuleExtension.
+
+Module CorridorMonotone (R : RuleExtension).
+
+  Theorem kappa_monotone :
+    forall k k', R.rule_step k k' -> kappa_sub k k'.
+  Proof.
+    intros k k' H.
+    pose proof (R.rule_step_extends H) as Hext_or.
+    destruct Hext_or as [Heq | [c [v Hext]]].
+    - subst k'. apply kappa_sub_refl.
+    - eapply extends_with_implies_sub. exact Hext.
+  Qed.
+
+  (** ** Further typed-rule-step monotonicity (2026-04-20) *)
+
+  (** A multi-step sequence of rule applications preserves kappa_sub. *)
+  Inductive rule_steps : kappa R.V -> kappa R.V -> Prop :=
+    | rule_steps_refl : forall k, rule_steps k k
+    | rule_steps_cons : forall k k' k'',
+        R.rule_step k k' -> rule_steps k' k'' -> rule_steps k k''.
+
+  Theorem kappa_multi_monotone :
+    forall k k', rule_steps k k' -> kappa_sub k k'.
+  Proof.
+    intros k k' H. induction H as [|k0 k1 k2 Hstep Hrest IH].
+    - apply kappa_sub_refl.
+    - apply kappa_sub_trans with (k2 := k1).
+      + apply kappa_monotone. exact Hstep.
+      + exact IH.
+  Qed.
+
+  (** rule_steps is transitive. *)
+  Theorem rule_steps_trans :
+    forall k k' k'',
+      rule_steps k k' -> rule_steps k' k'' -> rule_steps k k''.
+  Proof.
+    intros k k' k'' H1. revert k''.
+    induction H1 as [|k0 k1 k2 Hstep Hrest IH]; intros k3 H2.
+    - exact H2.
+    - eapply rule_steps_cons; [exact Hstep | apply IH; exact H2].
+  Qed.
+
+  (** A single rule_step embeds as a length-1 rule_steps. *)
+  Theorem rule_step_to_steps :
+    forall k k', R.rule_step k k' -> rule_steps k k'.
+  Proof.
+    intros k k' H. eapply rule_steps_cons; [exact H | apply rule_steps_refl].
+  Qed.
+
+End CorridorMonotone.
+
+(** ** Route-coherence checker over a normalized corridor snapshot
+
+    A multi-hop route can be compared with a direct corridor only after both
+    are normalized into a shared finite vocabulary.  At that point the
+    descent check is exactly equality of three finite surfaces:
+
+    - carried compliance cells;
+    - destination-side fresh-evaluation obligations;
+    - legal-instrument clauses.
+
+    The richer corridor semantics computes these snapshots.  This section
+    proves the checker core: once snapshots are normalized into canonical
+    list order, the Boolean checker is sound and complete for route
+    coherence. *)
+
+Definition nat_pair_eqb (p q : nat * nat) : bool :=
+  Nat.eqb (fst p) (fst q) && Nat.eqb (snd p) (snd q).
+
+Lemma nat_pair_eqb_eq :
+  forall p q, nat_pair_eqb p q = true -> p = q.
+Proof.
+  intros [a b] [c d] H.
+  unfold nat_pair_eqb in H. simpl in H.
+  apply andb_true_iff in H as [Ha Hb].
+  apply Nat.eqb_eq in Ha.
+  apply Nat.eqb_eq in Hb.
+  subst. reflexivity.
+Qed.
+
+Lemma nat_pair_eqb_refl :
+  forall p, nat_pair_eqb p p = true.
+Proof.
+  intros [a b]. unfold nat_pair_eqb. simpl.
+  rewrite !Nat.eqb_refl. reflexivity.
+Qed.
+
+Fixpoint list_eqb {A : Type} (eqb : A -> A -> bool)
+    (xs ys : list A) : bool :=
+  match xs, ys with
+  | nil, nil => true
+  | x :: xs', y :: ys' => eqb x y && list_eqb eqb xs' ys'
+  | _, _ => false
+  end.
+
+Lemma list_eqb_eq :
+  forall A (eqb : A -> A -> bool),
+    (forall x y, eqb x y = true -> x = y) ->
+    forall xs ys, list_eqb eqb xs ys = true -> xs = ys.
+Proof.
+  intros A eqb Heq xs.
+  induction xs as [|x xs IH]; intros ys H.
+  - destruct ys; simpl in H; [reflexivity | discriminate].
+  - destruct ys as [|y ys]; simpl in H; [discriminate |].
+    apply andb_true_iff in H as [Hxy Htail].
+    apply Heq in Hxy. subst y.
+    apply IH in Htail. subst ys.
+    reflexivity.
+Qed.
+
+Lemma list_eqb_refl :
+  forall A (eqb : A -> A -> bool),
+    (forall x, eqb x x = true) ->
+    forall xs, list_eqb eqb xs xs = true.
+Proof.
+  intros A eqb Hrefl xs.
+  induction xs as [|x xs IH]; simpl.
+  - reflexivity.
+  - rewrite Hrefl. rewrite IH. reflexivity.
+Qed.
+
+Record route_snapshot : Type := mk_route_snapshot {
+  carried_cells : list (nat * nat);
+  fresh_eval_domains : list nat;
+  instrument_clause_ids : list nat
+}.
+
+Definition route_snapshot_eqb (a b : route_snapshot) : bool :=
+  list_eqb nat_pair_eqb (carried_cells a) (carried_cells b) &&
+  list_eqb Nat.eqb (fresh_eval_domains a) (fresh_eval_domains b) &&
+  list_eqb Nat.eqb (instrument_clause_ids a) (instrument_clause_ids b).
+
+Definition route_coherent (direct staged : route_snapshot) : Prop :=
+  direct = staged.
+
+Theorem route_coherence_checker_sound :
+  forall direct staged,
+    route_snapshot_eqb direct staged = true ->
+    route_coherent direct staged.
+Proof.
+  intros [cc1 fe1 ic1] [cc2 fe2 ic2] H.
+  unfold route_snapshot_eqb in H. simpl in H.
+  apply andb_true_iff in H as [Hccfe Hic].
+  apply andb_true_iff in Hccfe as [Hcc Hfe].
+  apply list_eqb_eq in Hcc; [| apply nat_pair_eqb_eq].
+  apply list_eqb_eq in Hfe; [| intros x y Hy; apply Nat.eqb_eq; exact Hy].
+  apply list_eqb_eq in Hic; [| intros x y Hy; apply Nat.eqb_eq; exact Hy].
+  unfold route_coherent. subst. reflexivity.
+Qed.
+
+Theorem route_coherence_checker_complete :
+  forall direct staged,
+    route_coherent direct staged ->
+    route_snapshot_eqb direct staged = true.
+Proof.
+  intros direct staged H.
+  unfold route_coherent in H. subst staged.
+  destruct direct as [cc fe ic].
+  unfold route_snapshot_eqb. simpl.
+  rewrite (@list_eqb_refl (nat * nat)%type nat_pair_eqb nat_pair_eqb_refl cc).
+  rewrite (@list_eqb_refl nat Nat.eqb Nat.eqb_refl fe).
+  rewrite (@list_eqb_refl nat Nat.eqb Nat.eqb_refl ic).
+  reflexivity.
+Qed.
+
+Theorem route_coherence_checker_false_obstruction :
+  forall direct staged,
+    route_snapshot_eqb direct staged = false ->
+    ~ route_coherent direct staged.
+Proof.
+  intros direct staged Hfalse Hcoherent.
+  pose proof (route_coherence_checker_complete Hcoherent) as Htrue.
+  rewrite Htrue in Hfalse. discriminate.
+Qed.
+
+Theorem route_coherence_decidable :
+  forall direct staged,
+    { route_coherent direct staged } + { ~ route_coherent direct staged }.
+Proof.
+  intros direct staged.
+  destruct (route_snapshot_eqb direct staged) eqn:Hcheck.
+  - left. apply route_coherence_checker_sound. exact Hcheck.
+  - right. apply route_coherence_checker_false_obstruction. exact Hcheck.
+Qed.

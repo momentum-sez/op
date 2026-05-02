@@ -1,0 +1,40 @@
+name: cold-clone
+
+# Verifies the workspace is genuinely self-contained: a fresh clone of
+# *this repository alone* (no sibling checkouts, no preconfigured
+# environment) builds and tests cleanly. Catches any path dependency that
+# silently relies on a sibling repo.
+
+on:
+  push:
+    branches: [main, master, develop]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  cold-clone:
+    runs-on: ubuntu-latest
+    steps:
+      - name: fresh clone in scratch dir
+        run: |
+          set -euo pipefail
+          scratch=$(mktemp -d)
+          cd "$scratch"
+          git clone "https://github.com/${{ github.repository }}.git" repo
+          cd repo
+          git checkout "${{ github.sha }}"
+          ls -la ..
+      - uses: dtolnay/rust-toolchain@stable
+      - name: cargo check from scratch clone
+        run: |
+          scratch=$(ls -d /tmp/tmp.*/repo 2>/dev/null | head -1)
+          cd "$scratch"
+          cargo check --workspace --all-targets
+      - name: cargo test from scratch clone
+        run: |
+          scratch=$(ls -d /tmp/tmp.*/repo 2>/dev/null | head -1)
+          cd "$scratch"
+          cargo test --workspace --all-targets
