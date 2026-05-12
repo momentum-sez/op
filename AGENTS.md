@@ -50,6 +50,34 @@ Keep edits inside the requested surface. Avoid unrelated refactors. If a claim c
 
 If a proof, theorem, formal scaffold, executable semantics claim, or paper claim breaks, repair the object. Do not converge by deleting, demoting, or quietly weakening it. If repair cannot be completed, name the exact obstruction and next proof obligation.
 
+## XI. Code-Writing Discipline
+
+Twelve behavioural rules for code-writing agents (Claude, GPT-5-family, any subagent). Reproduced in their cultural form; sources: Karpathy (January 2026), Forrest Chang's CLAUDE.md (January 2026), thirty-codebase six-week empirical extension (May 2026). Bias: caution over speed on non-trivial work.
+
+**Rule 1 — Think Before Coding.** State assumptions explicitly. If uncertain, ask rather than guess. Present multiple interpretations when ambiguity exists. Push back when a simpler approach exists. Stop when confused. Name what's unclear.
+
+**Rule 2 — Simplicity First.** Minimum code that solves the problem. Nothing speculative. No features beyond what was asked. No abstractions for single-use code. Test: would a senior engineer say this is overcomplicated? If yes, simplify.
+
+**Rule 3 — Surgical Changes.** Touch only what you must. Clean up only your own mess. Don't "improve" adjacent code, comments, or formatting. Don't refactor what isn't broken. Match existing style.
+
+**Rule 4 — Goal-Driven Execution.** Define success criteria. Loop until verified. Don't follow steps; define success and iterate. Strong success criteria let you loop independently.
+
+**Rule 5 — Use the model only for judgment calls.** Use the model for classification, drafting, summarization, extraction. Do NOT use the model for routing, retries, deterministic transforms. If code can answer, code answers.
+
+**Rule 6 — Token budgets are not advisory.** Per-task: 4,000 tokens. Per-session: 30,000 tokens. If approaching budget, summarize and start fresh. Surface the breach. Do not silently overrun.
+
+**Rule 7 — Surface conflicts, don't average them.** If two patterns contradict, pick one (more recent / more tested). Explain why. Flag the other for cleanup. Don't blend conflicting patterns.
+
+**Rule 8 — Read before you write.** Before adding code, read exports, immediate callers, shared utilities. "Looks orthogonal" is dangerous. If unsure why code is structured a way, ask.
+
+**Rule 9 — Tests verify intent, not just behaviour.** Tests must encode WHY behaviour matters, not just WHAT it does. A test that can't fail when business logic changes is wrong.
+
+**Rule 10 — Checkpoint after every significant step.** Summarize what was done, what's verified, what's left. Don't continue from a state you can't describe back. If you lose track, stop and restate.
+
+**Rule 11 — Match the codebase's conventions, even if you disagree.** Conformance > taste inside the codebase. If you genuinely think a convention is harmful, surface it. Don't fork silently.
+
+**Rule 12 — Fail loud.** "Completed" is wrong if anything was skipped silently. "Tests pass" is wrong if any were skipped. Default to surfacing uncertainty, not hiding it.
+
 <!-- END INLINED-INVARIANTS -->
 
 <!-- BEGIN INLINED-AGENTS-HARNESS (public-safe export from ecosystem harness) -->
@@ -252,3 +280,20 @@ as part of the Momentum research programme at research.momentum.inc.
 - **No LLM credit in git commits.** NEVER include `Co-Authored-By` lines
   referencing Claude, Opus, GPT, Codex, or any LLM in commit messages. The
   author is the human operator.
+
+## Code-writing discipline — repo application
+
+Per the inlined `## XI. Code-Writing Discipline` block above. Twelve rules instantiated for op (Op typed bytecode; AST / type / effect / host-trait public surface; Lex↔Op adequacy proofs; Apache-2.0 public):
+
+1. **Think Before Coding.** Every wire-format edit names the public-surface invariant affected (AST, type, effect, host-trait). Every change to `formal/coq/` names the adequacy theorem or compiler lemma touched.
+2. **Simplicity First.** No new opcodes without a documented motivation. No speculative public-surface extensions ahead of an Op program needing them. Host bindings live out-of-tree — keep the language layer minimal.
+3. **Surgical Changes.** A verifier change does not touch the compiler; a compiler change does not touch the runtime semantics. Coq proof edits do not opportunistically restate other lemmas.
+4. **Goal-Driven Execution.** Success = `cargo check --workspace && cargo test --workspace && cargo clippy --workspace -- -D warnings` clean, `coqc` clean on `formal/coq/`, end-to-end canonical-corpus compilation passes, Lex↔Op adequacy proofs remain `Qed.`.
+5. **Use the model only for judgment calls.** Instruction dispatch, wire-format decoding, type / effect checks are deterministic. The model drafts documentation and worked examples; it does not decide opcode semantics.
+6. **Token budgets are not advisory.** Standard; checkpoint between proof updates and between opcode additions.
+7. **Surface conflicts, don't average them.** Coq adequacy proof wins over inline doc-comments and over informal spec text. If wire-format doc and verifier disagree, the verifier wins; fix the doc.
+8. **Read before you write.** Read the host-trait surface and the relevant Coq adequacy lemma before editing compiler code. The workspace has no path dependencies on external checkouts — verify the cold-clone build.
+9. **Tests verify intent.** Adequacy theorems remain proven; opcode tests assert semantic invariants under adversarial programs, not just round-trip parsing. A test that only checks `encode(decode(x)) == x` is vacuous.
+10. **Checkpoint after every significant step.** Between proof edits, summarize what is now proved versus what remains admissible. Between opcode additions, restate public-surface impact and whether a major version bump is required.
+11. **Match the codebase's conventions, even if you disagree.** Existing opcode encoding, Coq notation, public surface stability at AST / type / effect / host-trait boundaries. No parallel encoding schemes.
+12. **Fail loud.** If an opcode test is skipped, surface. If an adequacy lemma becomes `Admitted.`, escalate. Never silently downgrade a proof obligation or break the public surface without a major version bump.
