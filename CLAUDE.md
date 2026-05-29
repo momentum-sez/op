@@ -6,6 +6,18 @@
 
 <!-- BEGIN INLINED-INVARIANTS (public-safe export from ecosystem invariants) -->
 
+## 0. Canonical Product Framing — How Mass Is Described
+
+When any artifact in this repo defines or describes what **Mass** is, lead with the value, then the architecture:
+
+1. **AI-native operating system** that makes an organization **programmable** — programmable legal entities, organizations, and institutions. Institutions are one kind, not the whole; the category word is *organization / legal entity*.
+2. **End-to-end and autonomous** operation — the organization's regulated work (formation, ownership, treasury, identity, consent, compliance) runs as AI agents at machine speed, compliant-by-default and legal-by-default.
+3. **Radical cost savings** — the cost of operating a compliant entity collapses.
+4. **Radical headcount reduction** — a fully operational, fully compliant entity runs with a fraction of the people, down to the one-person company.
+5. **Sovereign deployment** — a jurisdiction stands up its own kernel in roughly ninety days for under ten million dollars, connected to others by corridors.
+
+Beneath the value, the architecture is a **rule engine + runtime engine** (a jurisdiction's law encoded as machine-executable rules, plus the engine that runs the regulated work against them, at the scale of an economy). Mass mints and governs claims; the clearing-and-settlement layer prices and settles them. Never describe Mass as "a rule engine" alone, a "compliance/policy engine," a "workflow tool," "administrative AI," or an "institutional operating system / OS / infrastructure / platform"; never lead with the architecture before the five value pillars.
+
 ## I. No Destructive Git
 
 Do not run commands that discard, rewrite, or hide work: no `git reset`, `git checkout`, `git switch`, `git restore`, `git stash`, `git clean`, `git rebase`, forced branch deletion, ref rewriting, or deletion of tracked files. Do not commit or push unless the user explicitly asks for that operation. If a destructive operation appears necessary, stop and ask.
