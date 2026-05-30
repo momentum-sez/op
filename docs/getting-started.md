@@ -6,7 +6,7 @@ installed.
 ## 1. Clone and build
 
 ```bash
-git clone https://github.com/raeez/op.git
+git clone https://github.com/momentum-sez/op.git
 cd op
 cargo check --workspace
 ```

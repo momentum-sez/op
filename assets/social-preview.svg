@@ -56,7 +56,7 @@
   <!-- Bottom-left: repo URL (monospace) -->
   <text x="80" y="572" font-family="'SF Mono','Menlo','Consolas',monospace"
         font-size="18" fill="#2c2c2c">
-    github.com/raeez/op
+    github.com/momentum-sez/op
   </text>
 
   <!-- Bottom-right: license + test count + Coq status -->

@@ -1,9 +1,9 @@
 # Op
 
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
-[![CI](https://github.com/raeez/op/actions/workflows/ci.yml/badge.svg)](https://github.com/raeez/op/actions/workflows/ci.yml)
-[![Coq](https://github.com/raeez/op/actions/workflows/coq.yml/badge.svg)](https://github.com/raeez/op/actions/workflows/coq.yml)
-[![Release](https://img.shields.io/badge/release-0.1.0-orange.svg)](https://github.com/raeez/op/releases)
+[![CI](https://github.com/momentum-sez/op/actions/workflows/ci.yml/badge.svg)](https://github.com/momentum-sez/op/actions/workflows/ci.yml)
+[![Coq](https://github.com/momentum-sez/op/actions/workflows/coq.yml/badge.svg)](https://github.com/momentum-sez/op/actions/workflows/coq.yml)
+[![Release](https://img.shields.io/badge/release-0.1.0-orange.svg)](https://github.com/momentum-sez/op/releases)
 [![Rust](https://img.shields.io/badge/rust-1.86.0-brown.svg)](rust-toolchain.toml)
 
 Op is a typed, stack-based bytecode and deterministic operational semantics for
@@ -188,7 +188,7 @@ into an Op boolean expression, a Lex defeasible rule compiles into a guarded
 `choose`, and a Lex compliance-fiber verdict compiles into an Op
 `ensures domains` declaration. Op does not re-interpret Lex semantics at
 runtime; compilation is content-addressed and version-pinned at authoring
-time. Lex lives at <https://github.com/raeez/lex>.
+time. Lex lives at <https://github.com/momentum-sez/lex>.
 
 ## Reproducibility
 

@@ -6,14 +6,14 @@ should obtain bit-identical or functionally-identical results.
 
 ## Repository
 
-- URL: <https://github.com/raeez/op>
+- URL: <https://github.com/momentum-sez/op>
 - Branch: `main`
 - License: Apache-2.0 (`LICENSE`)
 
 ## Clone
 
 ```
-git clone https://github.com/raeez/op.git
+git clone https://github.com/momentum-sez/op.git
 cd op
 ```
 
