@@ -280,7 +280,11 @@ fn reduce_args(args: &[(String, OpExpr)]) -> BTreeMap<String, Value> {
 /// crate stays dependency-light with a stable, deterministic FNV-1a
 /// variant that is adequate for replay verification in a test context.
 fn program_digest(program: &OpProgram) -> String {
-    let canonical = serde_json::to_string(program).unwrap_or_default();
+    // Fail loud rather than hashing the empty string on a serialization
+    // failure (which would collapse distinct programs to one digest — the
+    // same silent-fallback class hardened in op-compiler/hash.rs, OP-3).
+    let canonical = serde_json::to_string(program)
+        .expect("OpProgram must serialize for content addressing");
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
     for byte in canonical.bytes() {
         h ^= byte as u64;
