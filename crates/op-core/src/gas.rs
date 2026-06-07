@@ -182,10 +182,35 @@ fn statement_cost(stmt: &Statement, table: StructuralCostTable) -> u64 {
 ///
 /// Given `per_element_gas * cardinality`, returns the bound; returns `None`
 /// when the certificate is absent.
+///
+/// NOTE — this is a convenience helper and is NOT the path the type checker
+/// uses. The load-bearing extensional-bound computation lives in
+/// `types.rs::typecheck_program` and is FAIL-LOUD: it uses `checked_mul` and
+/// rejects the program (`extensional gas bound overflows u64`) on overflow
+/// rather than silently capping. This helper's `saturating_mul` would mint a
+/// `u64::MAX` ceiling for a product that is not representable — acceptable only
+/// because nothing in the checker calls it. Any future caller on a
+/// gas-bearing path MUST use the `checked_mul` discipline (return an error on
+/// overflow), not this saturating form. Pinned by `f10_extensional_gas_
+/// overflow_is_rejected` / `f10_representable_extensional_bound_is_exact` in
+/// `types.rs`.
 pub fn extensional_bound(per_element: u64, cert: Option<&CardinalityCertificate>) -> Option<u64> {
     let c = cert?;
     Some(per_element.saturating_mul(c.cardinality))
 }
+
+// FOLLOW-ON (structural gas limit). The STRUCTURAL bound this module computes
+// (`estimate_structural_gas`) is now enforced at compile time against a
+// declared budget in `types.rs::typecheck_program`: when
+// `program.gas_budget.structural_gas > 0` and the computed bound exceeds it,
+// the program is rejected (`structural gas bound … exceeds declared budget`).
+// What remains FOLLOW-ON is the RUNTIME side: threading a live `GasMeter`
+// through an actual reduction evaluator so structural/extensional gas is
+// *charged during execution* (and so the `Outcome::OutOf{Structural,
+// Compensation}Gas` terminals in `ast.rs` are driven by real exhaustion, not
+// just reachable by construction). op-core ships no such evaluator today (see
+// the README two-tier-gas note); this is a feature pending the evaluator, not
+// a soundness bug in the static bound.
 
 #[cfg(test)]
 mod tests {

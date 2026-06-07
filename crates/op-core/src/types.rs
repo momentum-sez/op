@@ -577,6 +577,24 @@ fn check_statement(
             );
         }
         Statement::Policy { name, domains } => {
+            // FAIL-CLOSED: a `policy` block is REJECTED at type-check — a bare
+            // policy scope carries no verified proof receipt, so it can never
+            // satisfy the gate it names. This is rejection-by-design pending a
+            // proof backend that supplies a receipt; there is no silent-accept
+            // path (success requires `errors.is_empty()`, and this push makes
+            // the program fail). The `f11_policy_block_requires_receipt` test
+            // pins it.
+            //
+            // CONSISTENCY NOTE (effects.rs): the effect-safety walker
+            // (`SafetyCtx::walk_stmt`) intentionally treats `Statement::Policy`
+            // as a no-op (`Policy { .. } => {}`). That is sound precisely
+            // because this type-check rejection is unreachable-past: a program
+            // containing a `policy` block never type-checks, so the effect
+            // walker never has to assign it an effect contribution. The two
+            // surfaces are NOT in conflict — type-check is the single fail-loud
+            // gate; effects.rs ignores Policy because no admitted program can
+            // contain one. (effects.rs is outside this file's edit scope; this
+            // note records the design decision on the rejecting side.)
             errors.push(format!(
                 "policy block `{name}` over domains {domains:?} requires a verified proof receipt"
             ));
@@ -1357,6 +1375,19 @@ fn record_safety_assertions(
     site: &str,
 ) {
     match expr {
+        // FAIL-CLOSED: a bare `AssertSafety` is REJECTED — it carries no
+        // verified receipt, so it cannot discharge the compositional-safety
+        // predicate it asserts. This is rejection-by-design pending a proof
+        // backend that produces a receipt the checker can admit; it is NOT a
+        // silent accept. Note the deliberate split: the `check_expr` /
+        // `static_expr_type` arms type a bare `AssertSafety` as `Unit`/`Ok`
+        // (its *expression validity* / *type*), but `record_safety_assertions`
+        // — invoked at EVERY expression site via `check_expression_site`, and
+        // recursing into every sub-expression so nested asserts cannot hide —
+        // unconditionally pushes both a `failed_predicates` entry and an error,
+        // and program success requires `errors.is_empty()`. So a bare assert
+        // always fails type-check. Pinned by `bare_assert_safety_fails_without_
+        // receipt` and `f11_nested_assert_safety_fails_loud`.
         OpExpr::AssertSafety(predicate) => {
             failed.push(SafetyPredicateFailure {
                 predicate: predicate.clone(),

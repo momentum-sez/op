@@ -70,12 +70,19 @@ pub struct Contracts {
 // FOLLOW-ON: `Contract::LexRule(LexRuleRef)` from
 // `docs/proposal-lex-rule-contract-and-pack-binding.md` §2.1/§3 is NOT yet a
 // variant of this enum. Adding it is a joint op-core + op-stdlib + lex-core
-// surface change (the variant here, the `LexRuleRef`/`LexRuleHash` types, the
-// §3.1 completeness check and §3.2 per-rule structural discharge in
-// `typecheck_program`, and a pack handle / `CompiledTerm` contract op-core does
-// not yet carry — see the matching FOLLOW-ON block in `types.rs`). It is a
-// feature, not a soundness bug in the current contract surface, and is
-// deliberately left unimplemented in this pass.
+// surface change. Per proposal §2.1 the variant carries a `LexRuleRef`, and
+// NONE of the types it needs exist yet in this crate:
+//   * `LexRuleRef { rule_hash, jurisdiction, pack_version }` — the reference,
+//   * `LexRuleHash` — the rule's content hash as carried in the pack,
+//   * `PackVersion` — the pinned pack version (the deterministic-replay
+//     binding the §3.1 completeness check rejects a mismatch against),
+//   * `QualIdent` — the jurisdiction qualifier on the ref.
+// Implementing the variant also requires the §3.1 completeness check and §3.2
+// per-rule structural discharge in `typecheck_program`, plus a pack handle /
+// `CompiledTerm` (`CompiledLexPredicate`) contract op-core does not yet carry
+// — see the matching FOLLOW-ON block in `types.rs`. It is a feature, not a
+// soundness bug in the current contract surface, and is deliberately left
+// unimplemented in this pass.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Contract {
     /// Shorthand: a set of compliance domains must be evaluated / satisfied.
