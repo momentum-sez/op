@@ -245,15 +245,14 @@ fully explicit program. The fully explicit form is what gets
 type-checked, hashed, and shipped. `auto_lex` is sugar; the canonical
 program is always fully explicit.
 
-### 4.3 YAML lowering (kernel-side, demolition scaffolding)
+### 4.3 YAML lowering
 
-The kernel's existing YAML operation files are lowered to Op via
-`mez-op-compiler`. After this proposal lands and the kernel adopts the
-canonical Op surface, every YAML lowering produces a fully explicit
-Op program with `Contract::LexRule` entries populated from the active
-pack. YAML authors do not write `applies_to` and do not write rule
-hashes; the lowering pipeline does it. YAML remains a kernel-side
-authoring affordance, not a canonical Op surface.
+Legacy YAML operation files are lowered to Op via `op-compiler`
+(`crates/op-compiler`). After this proposal lands, every YAML lowering
+produces a fully explicit Op program with `Contract::LexRule` entries
+populated from the active pack. YAML authors do not write `applies_to`
+and do not write rule hashes; the lowering pipeline does it. YAML
+remains an import affordance, not a canonical Op surface.
 
 ## 5. Op-Lex-Compiler: from `Contracts::default()` to populated contracts
 
@@ -399,8 +398,8 @@ the type checker becomes load-bearing.
 2. **Pack signature scheme.** The companion proposal specifies hybrid
    PQ. This proposal must specify the exact verification interface
    (`pack.verify_signature(curator_did) -> Result<()>`) and the
-   `mez-trust`-equivalent verifier. Op should not depend on the
-   kernel's `mez-trust`; the canonical verifier lives in a new
+   canonical verifier backing it. Op owns its own verifier rather than
+   importing an external one; the canonical verifier lives in a new
    `op-pack-verify` crate or, preferably, in `lex-pack` itself
    alongside the pack format definition.
 3. **`structural_discharge` pattern grammar.** §3.2 lists four
