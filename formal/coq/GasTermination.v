@@ -6,10 +6,18 @@
     natural-number gas measure is strongly normalizing.
 
     This is the abstract form of the paper's finite-gas
-    termination (thm:op-progress, currently Admitted in
-    OpPaperTargets.v) reduced to its pure combinatorial core.
-    Concrete Op reduction satisfies the hypotheses by the
-    mechanized gas semantics. *)
+    termination (thm:op-progress) reduced to its pure combinatorial
+    core.  NOTE: this proves termination only for the abstract
+    gas-decreasing step relation declared as a Module Type parameter
+    below; it is NOT a termination proof for Op proper.  The paper's
+    thm:op-progress is an OPEN target obligation for the real Op
+    expression semantics — it is no longer staged as an [Admitted]
+    theorem in [OpPaperTargets.v] (that file now carries only
+    parametric signatures and concrete toy-fragment witnesses, no
+    [Admitted] theorems), but it is not closed over Op proper either.
+    The claim "Concrete Op reduction satisfies the hypotheses by the
+    mechanized gas semantics" is the intended discharge route, not a
+    delivered theorem. *)
 
 Require Import Coq.Arith.PeanoNat.
 Require Import Coq.micromega.Lia.
