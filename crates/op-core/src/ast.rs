@@ -66,6 +66,16 @@ pub struct Contracts {
 }
 
 /// A contract clause.
+///
+// FOLLOW-ON: `Contract::LexRule(LexRuleRef)` from
+// `docs/proposal-lex-rule-contract-and-pack-binding.md` §2.1/§3 is NOT yet a
+// variant of this enum. Adding it is a joint op-core + op-stdlib + lex-core
+// surface change (the variant here, the `LexRuleRef`/`LexRuleHash` types, the
+// §3.1 completeness check and §3.2 per-rule structural discharge in
+// `typecheck_program`, and a pack handle / `CompiledTerm` contract op-core does
+// not yet carry — see the matching FOLLOW-ON block in `types.rs`). It is a
+// feature, not a soundness bug in the current contract surface, and is
+// deliberately left unimplemented in this pass.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Contract {
     /// Shorthand: a set of compliance domains must be evaluated / satisfied.
@@ -678,6 +688,17 @@ pub enum Outcome {
         limit: u64,
     },
     /// Compensation gas exhaustion.
+    ///
+    // FOLLOW-ON: this terminal variant is part of the §4.13 seven-terminal
+    // enumeration, but no compensation-gas *reserve* logic in-tree produces it
+    // yet. A reserve would require: a distinct compensation-gas budget carried
+    // alongside `GasBudget`, a runtime reduction evaluator that debits it while
+    // executing an inverse (compensation) path, and emission of this terminal
+    // when the reserve is exhausted. The current `gas` module meters forward
+    // structural/extensional gas only and ships no evaluator to thread it (see
+    // the README gas-model note), so this variant is reachable by construction
+    // of the enum but is not yet driven by execution. It is a feature, not a
+    // soundness bug; left unimplemented in this pass.
     OutOfCompensationGas {
         /// Compensation gas consumed at the point of failure.
         used: u64,

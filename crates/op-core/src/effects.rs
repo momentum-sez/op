@@ -730,20 +730,32 @@ pub(crate) fn canonical_primitive_known(name: &str) -> bool {
     )
 }
 
-/// Whether the canonical primitive is deferred-subject class (entity
-/// creation). Mirrors `op_stdlib::is_deferred_subject`.
+/// The single canonical predicate for the deferred-subject (entity-creation)
+/// sanctions exception. This is the ONE source of truth consulted by both the
+/// expression-level walker ([`walk_expr_effects_into`], `canonical_effects_for`
+/// synthesis) and the statement-level [`SafetyCtx::check_step`] path, so the
+/// unscreened-write exception is exactly the same primitive set at every
+/// precedence. Mirrors `op_stdlib::is_deferred_subject` (which resolves through
+/// the `CANONICAL_PRIMITIVES` table); the spec lists `create.entity` as the
+/// only canonical deferred-subject primitive.
+///
+/// Soundness note: a *broader* match here than at the other level would let a
+/// primitive be treated as entity-create at one precedence but not the other,
+/// so a deferred (unscreened) subject could slip the sanctions/subject
+/// discipline at the level with the looser predicate. Both levels MUST consult
+/// this function. The `levels_agree_on_deferred_subject_set` test pins the
+/// agreement across the full canonical primitive set.
 pub(crate) fn canonical_is_deferred_subject(name: &str) -> bool {
     matches!(name, "create.entity")
 }
 
-/// Identify the deferred-subject entity-creation primitive family.
-/// The spec lists `create.entity` as the canonical case.
+/// Statement-level adapter over [`canonical_is_deferred_subject`]. Identifies
+/// whether a step body invokes the deferred-subject entity-creation primitive.
+/// Delegates to the single canonical predicate so the statement-level exception
+/// set is byte-for-byte the expression-level set (no prefix widening).
 fn is_entity_create_primitive(body: &StepBody) -> bool {
     match body {
-        StepBody::Primitive(p, _) => {
-            let n = &p.0;
-            n == "create.entity" || n.starts_with("entity.create")
-        }
+        StepBody::Primitive(p, _) => canonical_is_deferred_subject(&p.0),
         StepBody::Block(_) => false,
     }
 }
@@ -1104,6 +1116,71 @@ mod tests {
             vec![],
         ))]);
         assert!(check_effect_safety(&prog).is_ok());
+    }
+
+    /// The expression-level deferred-subject predicate
+    /// (`canonical_is_deferred_subject`) and the statement-level predicate
+    /// (`is_entity_create_primitive`) MUST agree on the full canonical
+    /// primitive set. A disagreement is the
+    /// `deferred-subject-wildcard-mismatch` soundness hazard: a primitive
+    /// treated as entity-create (unscreened-write exempt) at one precedence but
+    /// not the other lets an unscreened subject slip the sanctions discipline
+    /// at the looser level. This test fails the moment either predicate widens
+    /// (e.g. a re-introduced `entity.create*` prefix match) without the other.
+    #[test]
+    fn levels_agree_on_deferred_subject_set() {
+        // Every canonical primitive, plus adversarial near-misses that a prefix
+        // match would have wrongly admitted.
+        let names = [
+            "create.entity",
+            "update.entity_status",
+            "ownership.issue_shares",
+            "ownership.transfer",
+            "update.cap_table",
+            "membership.admit",
+            "create.treasury",
+            "create.bank_account",
+            "fiscal.open_account",
+            "fiscal.transfer",
+            "identity.verify",
+            "consent.board_resolution",
+            "consent.member_resolution",
+            "consent.shareholder_vote",
+            "screening.sanctions",
+            "sanctions.check",
+            "trade.invoice_create",
+            "trade.lc_issue",
+            "document.board_minutes",
+            "document.shareholder_minutes",
+            "document.commercial_invoice",
+            "filing.registry_amendment",
+            "attestation.append",
+            "attestation.emit",
+            // Adversarial near-misses: a `starts_with("entity.create")` match
+            // would have admitted these as deferred-subject at the step level.
+            "entity.create",
+            "entity.create_shell",
+            "entity.create.bypass",
+        ];
+        for name in names {
+            let expr_level = canonical_is_deferred_subject(name);
+            let stmt_level = is_entity_create_primitive(&StepBody::Primitive(
+                Primitive(name.to_string()),
+                vec![],
+            ));
+            assert_eq!(
+                expr_level, stmt_level,
+                "deferred-subject predicate disagreement for '{name}': \
+                 expr-level={expr_level} stmt-level={stmt_level}"
+            );
+        }
+        // The exception set is exactly {create.entity}.
+        assert!(canonical_is_deferred_subject("create.entity"));
+        assert!(!canonical_is_deferred_subject("entity.create"));
+        assert!(!is_entity_create_primitive(&StepBody::Primitive(
+            Primitive("entity.create_shell".to_string()),
+            vec![]
+        )));
     }
 
     #[test]

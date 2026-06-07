@@ -11,11 +11,16 @@ compliance-carrying operations in sovereign institutional kernels. An Op
 program is a directed acyclic graph of typed steps with an explicit effect
 row, precondition and postcondition contracts, a scoped compensation branch
 attached to the step it inverts, and explicit suspension and resumption
-semantics for callback events. Reduction is deterministic and metered by a
-two-axis gas model that separates structural cost from extensional cost, and
-every execution produces a content-addressed proof bundle sufficient to replay
-the operation on any host that shares the program definition, input bundle,
-pack digest, oracle log, and deterministic primitive semantics.
+semantics for callback events. The gas model is two-axis, separating
+structural cost from extensional cost. The structural axis is bounded
+statically by program shape at type-check time (`estimate_structural_gas`); a
+runtime `GasMeter` charging both axes is specified and implemented, but the
+in-tree language core does not yet ship a reduction evaluator that threads it,
+so runtime metering against cardinality certificates is a design target rather
+than an in-tree capability (see the conservation-invariant status below). Every
+execution is intended to produce a content-addressed proof bundle sufficient to
+replay the operation on any host that shares the program definition, input
+bundle, pack digest, oracle log, and deterministic primitive semantics.
 Lex, the rule language for jurisdictional compliance, compiles into Op:
 `docs/language-spec.md` is the language surface, and the paper *Op: A Typed
 Bytecode for Compliance-Carrying Operations* at research.momentum.inc is the
@@ -29,7 +34,11 @@ distinguish it.
 
 1. **Effect rows with a sanctions-dominance law.** Tracked effects are
    path-indexed; any reachable state mutation not dominated by a sanctions
-   check fails to type-check.
+   check fails to type-check, with a single deferred-subject exception —
+   entity creation (`create.entity`), where the subject does not yet exist and
+   the sanctions check is permitted to run post-flight. That exception is one
+   canonical predicate consulted identically at the expression and statement
+   levels, so it admits exactly `create.entity` and nothing else.
 
 2. **Typed suspension.** `await e within d` is a typed construct whose
    continuation is serialized into the proof bundle, so suspension is as
@@ -43,8 +52,13 @@ distinguish it.
    typestates `Locked<T, omega, epsilon>`, `Signed<T, omega, epsilon>`,
    `Verified<omega, epsilon>`, and `Blame<omega, epsilon, reason>` lift
    bilateral cross-zone commit obligations into the type surface. The current
-   Rust AST exposes the narrower unindexed `Locked<T>` prototype while the
-   indexed surface is closed formally.
+   Rust AST exposes the narrower unindexed `Locked<T>` prototype. The indexed
+   surface is *modeled* in the Coq tree as a session-typed corridor protocol
+   (`formal/coq/SessionCorridor.v`, `formal/coq/MPSTProjection.v`) with scoped
+   closed fragments (session safety, deadlock freedom, decision/ack
+   no-divergence); it is not blanket "closed formally" — lock duality and the
+   full indexed surface remain target obligations per `formal/README.md`, and
+   the Rust enforcement of `Locked<T>` duality is the unindexed prototype.
 
 5. **Bilateral cross-zone composition.** Composition across two zones
    produces verdicts via the pointwise meet on the compliance lattice. The
