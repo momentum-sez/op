@@ -30,6 +30,24 @@ pub struct TypeContext {
     pub(crate) consumed_linears: HashSet<String>,
     /// Locked resource names (currently in a locked state).
     pub(crate) locked: HashSet<String>,
+    /// Resource names whose lock capability has been spent (commit-transfer or
+    /// release-lock). The lock capability of an affine `Locked<T>` is
+    /// single-use: once a lock has been committed or released, the same name
+    /// may never be re-locked. This is what makes the lock/commit/release
+    /// triple an *affine* discipline rather than an unbounded re-entrant one.
+    /// A released name remains consumable as a `Linear<T>` (release restores
+    /// the linear), but it can never be locked again. See F6.
+    pub(crate) lock_spent: HashSet<String>,
+    /// Real linearity/affinity violations observed during the walk, recorded
+    /// by resource name. A violation is recorded whenever a linear resource is
+    /// used after consumption, locked after consumption, accessed while
+    /// locked, double-locked after its lock capability was spent, or
+    /// double-consumed. These are surfaced in `TypeCheckResult.linearity_violations`.
+    /// (Previously `linearity_violations` was computed as the intersection of
+    /// `consumed_linears` and `locked`, which is structurally always empty —
+    /// a name is removed from `locked` the instant it is consumed/released, so
+    /// no violation was ever reported. See F1.)
+    pub(crate) linearity_violations: BTreeSet<String>,
     /// Obligations raised when `choose` / `par` branches consume a linear
     /// asymmetrically: if one arm consumed but another didn't, the
     /// non-consuming arm must not reference the name downstream. Keyed by
@@ -56,10 +74,18 @@ impl TypeContext {
     /// Mark a linear resource as consumed.
     pub fn consume_linear(&mut self, name: &str) -> Result<(), OpError> {
         if self.consumed_linears.contains(name) {
+            // Record the real violation so it surfaces in
+            // `linearity_violations`, then fail loud. See F1.
+            self.linearity_violations.insert(name.to_string());
             return Err(OpError::LinearityViolation(name.to_string()));
         }
         self.consumed_linears.insert(name.to_string());
         Ok(())
+    }
+
+    /// Record a real linearity/affinity violation by resource name. Idempotent.
+    pub(crate) fn record_linearity_violation(&mut self, name: &str) {
+        self.linearity_violations.insert(name.to_string());
     }
 
     /// Check whether a linear resource has already been consumed.
@@ -104,6 +130,16 @@ impl TypeContext {
             }
         }
         self.consumed_linears.extend(union);
+        // Carry forward lock-capability-spent and real linearity violations
+        // from every branch: a lock spent or a violation observed on ANY arm
+        // is globally true after the branch point (a name re-locked in arm A
+        // must not be re-lockable downstream of the join; a violation seen in
+        // arm B must be reported). See F1 / F6.
+        for b in branches {
+            self.lock_spent.extend(b.lock_spent.iter().cloned());
+            self.linearity_violations
+                .extend(b.linearity_violations.iter().cloned());
+        }
         // Also carry forward any nested asymmetric obligations so nested
         // branches surface them at the top level.
         for b in branches {
@@ -132,6 +168,12 @@ pub struct TypeCheckResult {
     pub failed_predicates: Vec<SafetyPredicateFailure>,
     /// Linearity violations.
     pub linearity_violations: Vec<String>,
+    /// Asymmetric-consumption obligations: linear resource names consumed on
+    /// some `choose`/`par` branch(es) but not all. A name listed here was made
+    /// globally-consumed at the branch join, so any downstream reference is a
+    /// linearity error; the obligation is surfaced so callers/regulators can
+    /// see which resources carry an arm-asymmetric consumption. See F7.
+    pub asymmetric_consumption_obligations: Vec<String>,
     /// Gas analysis result.
     pub gas_analysis: Option<GasAnalysis>,
     /// Type errors.
@@ -157,6 +199,23 @@ pub struct GasAnalysis {
     /// Extensional gas bound (if cardinality is known).
     pub max_extensional_gas: Option<u64>,
 }
+
+// FOLLOW-ON (deliberately NOT implemented in this soundness pass — these are
+// FEATURES, not soundness bugs in the linear/affine core): two pack-binding
+// checks specified in `docs/proposal-lex-rule-contract-and-pack-binding.md` §3
+// remain open work for `typecheck_program`:
+//   * `type-checker-no-contract-validation` — §3.1 completeness: query the
+//     active pack for every Lex rule whose `applies_to` matches the program's
+//     (operation_type, jurisdiction) and reject if the program's `requires`
+//     omits any (`TypeError::IncompleteLexDischarge`).
+//   * `structural-discharge-not-implemented` — §3.2 per-rule structural
+//     discharge: a syntactic, decidable check that walks the program body and
+//     verifies a structural witness exists for each declared rule's compiled
+//     predicate (sanctions_check gating writes, governance_request on a policy,
+//     obligation-before-write effect-DAG domination, certificate proof_emit).
+// Both require a pack handle / `CompiledTerm` contract that `op-core` does not
+// yet carry; they are joint `lex-core` + `op-stdlib` + `op-core` surface (see
+// proposal §3.2). They do not affect the linear/affine soundness fixed here.
 
 /// Type-check an Op program.
 pub fn typecheck_program(program: &OpProgram) -> TypeCheckResult {
@@ -220,26 +279,52 @@ pub fn typecheck_program(program: &OpProgram) -> TypeCheckResult {
     }
 
     let gas_bound = estimate_structural_gas(&program.body, StructuralCostTable::default());
-    let extensional_bound = program
-        .gas_budget
-        .cardinality_certificate
-        .as_ref()
-        .map(|c| {
-            program
-                .gas_budget
-                .per_element_gas
-                .saturating_mul(c.cardinality)
-        });
+    // Extensional bound = per_element_gas × cardinality. A `saturating_mul`
+    // here silently caps at `u64::MAX`, which would mint a *valid-looking*
+    // finite bound for an arithmetic overflow — a program whose true
+    // extensional cost cannot be represented would type-check with a bogus
+    // ceiling. Use `checked_mul` and reject on overflow (fail loud). See F10.
+    let mut extensional_bound: Option<u64> = None;
+    if let Some(c) = program.gas_budget.cardinality_certificate.as_ref() {
+        match program.gas_budget.per_element_gas.checked_mul(c.cardinality) {
+            Some(bound) => extensional_bound = Some(bound),
+            None => errors.push(format!(
+                "extensional gas bound overflows u64: per_element_gas {} × cardinality {} \
+                 (query `{}`) is not representable",
+                program.gas_budget.per_element_gas, c.cardinality, c.query
+            )),
+        }
+    }
+
+    // Surface the computed structural gas bound against the declared budget.
+    // A structural bound that exceeds the declared `structural_gas` limit is a
+    // budget violation: the workflow skeleton provably costs more than the
+    // program reserved. (`structural_gas == 0` means "unspecified" and is not
+    // enforced — the bound is still surfaced via GasAnalysis.structural_bound.)
+    // See F-MEDIUM (structural-gas-limit-never-enforced).
+    if program.gas_budget.structural_gas > 0 && gas_bound > program.gas_budget.structural_gas {
+        errors.push(format!(
+            "structural gas bound {gas_bound} exceeds declared budget {}",
+            program.gas_budget.structural_gas
+        ));
+    }
 
     // Deterministic diagnostic order: a BTreeSet sorts names lexicographically
     // so replay runs emit the violations list in stable sequence. This backs
     // the replay-determinism claim in the op-core proof-bundle contract.
-    let linearity_sorted: BTreeSet<String> = ctx
-        .consumed_linears
-        .iter()
-        .filter(|n| ctx.locked.contains(n.as_str()))
-        .cloned()
-        .collect();
+    //
+    // Real linearity/affinity violations are accumulated during the walk in
+    // `ctx.linearity_violations` (double-consume, use-after-consume,
+    // access-while-locked, lock-after-consume, re-lock-after-spend). The old
+    // `consumed_linears ∩ locked` intersection was structurally always empty
+    // and reported nothing. See F1.
+    let linearity_sorted: BTreeSet<String> = ctx.linearity_violations.clone();
+    let asymmetric_obligations: Vec<String> = {
+        let mut v = ctx.branch_asymmetric_consumptions.clone();
+        v.sort();
+        v.dedup();
+        v
+    };
     TypeCheckResult {
         success: errors.is_empty(),
         inferred_type: Some(serde_json::to_string(&program.outputs).unwrap_or_default()),
@@ -247,6 +332,7 @@ pub fn typecheck_program(program: &OpProgram) -> TypeCheckResult {
         deferred_predicates: deferred,
         failed_predicates: failed,
         linearity_violations: linearity_sorted.into_iter().collect(),
+        asymmetric_consumption_obligations: asymmetric_obligations,
         gas_analysis: Some(GasAnalysis {
             structural_bound: gas_bound,
             needs_cardinality_cert: program.gas_budget.per_element_gas > 0
@@ -288,7 +374,24 @@ fn statement_contains_return(stmt: &Statement) -> bool {
 }
 
 fn initializer_compatible(annotation: &OpType, actual: &OpType) -> bool {
-    annotation == actual || matches!(annotation, OpType::Linear(inner) if inner.as_ref() == actual)
+    annotation == actual
+        || matches!(annotation, OpType::Linear(inner) if inner.as_ref() == actual)
+        || matches!(actual, OpType::Linear(inner) if inner.as_ref() == annotation)
+}
+
+/// Choose the binding type for a `let` so that linearity is never erased by a
+/// looser annotation. If either the annotation or the inferred type is
+/// `Linear<T>` over the same inner type, bind the `Linear<T>` form: a resource
+/// the initializer produced linearly must remain linear in scope even if the
+/// author wrote the bare inner type, and a resource the author declared linear
+/// stays linear even if the initializer inferred bare. Otherwise bind the
+/// annotation (the author's intent). See F-MEDIUM (initializer-compatible-asymmetry).
+fn binding_type_preserving_linearity(annotation: &OpType, actual: &OpType) -> OpType {
+    match (annotation, actual) {
+        (OpType::Linear(_), _) => annotation.clone(),
+        (_, OpType::Linear(inner)) if inner.as_ref() == annotation => actual.clone(),
+        _ => annotation.clone(),
+    }
 }
 
 fn check_block(
@@ -325,14 +428,19 @@ fn check_statement(
     match stmt {
         Statement::Let { name, ty, value } => {
             check_expression_site(value, ctx, errors, failed, &format!("in let {name}"));
+            // Bind the linearity-preserving type so an annotation cannot hide a
+            // linear initializer (and downstream double-use stays detectable).
+            let mut bound_ty = ty.clone();
             match static_expr_type(value, ctx) {
-                Ok(actual) if initializer_compatible(ty, &actual) => {}
+                Ok(actual) if initializer_compatible(ty, &actual) => {
+                    bound_ty = binding_type_preserving_linearity(ty, &actual);
+                }
                 Ok(actual) => errors.push(format!(
                     "let `{name}` initializer type {actual:?} does not match annotation {ty:?}"
                 )),
                 Err(err) => errors.push(format!("in let {name} type inference: {err}")),
             }
-            ctx.bind(name.clone(), ty.clone());
+            ctx.bind(name.clone(), bound_ty);
         }
         Statement::Run { name, call } => {
             check_expression_site(call, ctx, errors, failed, &format!("in run {name}"));
@@ -512,8 +620,20 @@ fn check_expr(expr: &OpExpr, ctx: &mut TypeContext) -> Result<(), String> {
         OpExpr::Var(name) => {
             if ctx.lookup(name).is_some() {
                 if ctx.consumed_linears.contains(name) {
+                    ctx.record_linearity_violation(name);
                     return Err(format!(
                         "linear-use-after-consume: {name} was consumed earlier in this branch"
+                    ));
+                }
+                // A `Locked<T>` is affine with EXACTLY two eliminators
+                // (commit_transfer, release_lock). A bare `Var` reference to a
+                // locked resource is direct access that bypasses both — forbid
+                // it. See F2.
+                if ctx.is_locked(name) {
+                    ctx.record_linearity_violation(name);
+                    return Err(format!(
+                        "locked-resource-access: {name} is locked and may only be eliminated by \
+                         commit_transfer or release_lock"
                     ));
                 }
                 Ok(())
@@ -521,7 +641,24 @@ fn check_expr(expr: &OpExpr, ctx: &mut TypeContext) -> Result<(), String> {
                 Err(format!("unbound variable: {name}"))
             }
         }
-        OpExpr::Field(base, _field) => check_expr(base, ctx),
+        OpExpr::Field(base, _field) => {
+            // Field access of a locked underlying resource is still access to
+            // the locked resource and must be rejected — the `Locked<T>`
+            // wrapper cannot be peeled by projection. See F4. (The recursive
+            // `check_expr(base)` below also catches a bare locked `Var`, but we
+            // reject explicitly on the underlying name to give a precise
+            // diagnostic even through nested projection.)
+            if let Some(n) = underlying_var(base) {
+                if ctx.is_locked(&n) {
+                    ctx.record_linearity_violation(&n);
+                    return Err(format!(
+                        "locked-resource-access: field access of locked resource '{n}' is not \
+                         permitted; eliminate it with commit_transfer or release_lock"
+                    ));
+                }
+            }
+            check_expr(base, ctx)
+        }
         OpExpr::Record(fields) => {
             for (_name, e) in fields {
                 check_expr(e, ctx)?;
@@ -627,8 +764,26 @@ fn check_expr(expr: &OpExpr, ctx: &mut TypeContext) -> Result<(), String> {
                     return Err(format!("unbound variable: {n}"));
                 }
                 if ctx.consumed_linears.contains(n) {
+                    ctx.record_linearity_violation(n);
                     return Err(format!(
                         "linear-use-after-consume: {n} cannot be locked after consumption"
+                    ));
+                }
+                if ctx.is_locked(n) {
+                    ctx.record_linearity_violation(n);
+                    return Err(format!(
+                        "double-lock: {n} is already locked and cannot be locked again"
+                    ));
+                }
+                // The lock capability is single-use (affine). Once a name's
+                // lock was committed or released, it can never be re-locked —
+                // otherwise lock/release/lock/commit would let one linear
+                // resource be transferred across two corridors. See F6.
+                if ctx.lock_spent.contains(n) {
+                    ctx.record_linearity_violation(n);
+                    return Err(format!(
+                        "lock-after-release: {n} had its lock capability spent (committed or \
+                         released) and cannot be locked again"
                     ));
                 }
                 ctx.lock(n);
@@ -638,36 +793,146 @@ fn check_expr(expr: &OpExpr, ctx: &mut TypeContext) -> Result<(), String> {
             }
         }
         OpExpr::CommitTransfer { locked, witness } => {
-            if let OpExpr::Var(n) = locked.as_ref() {
-                if !ctx.is_locked(n) {
-                    return Err(format!(
-                        "commit_transfer requires a locked resource; '{n}' is not locked"
-                    ));
-                }
-                // Committing consumes the linear resource underlying the lock,
-                // AND eliminates the Locked<T> wrapper — see F4.
-                ctx.consume_linear(n).map_err(|e| e.to_string())?;
-                ctx.locked.remove(n);
-            } else {
-                check_expr(locked, ctx)?;
-            }
+            // The lock check must hold regardless of how the locked handle is
+            // wrapped. `commit_transfer(account.lock_handle, w)` or
+            // `commit_transfer({h: x}, w)` must NOT bypass the locked-resource
+            // requirement. Find the locked variable underneath any
+            // Field/Record/Call/Var wrapping and enforce on it. See F3.
+            let target = locked_target(locked, ctx).ok_or_else(|| {
+                format!(
+                    "commit_transfer requires a locked resource; none of the referenced \
+                     resources {:?} are locked",
+                    referenced_vars(locked)
+                )
+            })?;
+            // Committing consumes the linear resource underlying the lock, AND
+            // eliminates the Locked<T> wrapper, AND spends the lock capability
+            // so the name can never be re-locked. See F3/F4/F6.
+            ctx.consume_linear(&target).map_err(|e| e.to_string())?;
+            ctx.locked.remove(&target);
+            ctx.lock_spent.insert(target);
             check_expr(witness, ctx)
         }
         OpExpr::ReleaseLock { locked, witness } => {
-            if let OpExpr::Var(n) = locked.as_ref() {
-                if !ctx.is_locked(n) {
-                    return Err(format!(
-                        "release_lock requires a locked resource; '{n}' is not locked"
-                    ));
-                }
-                // Release restores Locked<T> to Linear<T>; the linear is *not*
-                // consumed. See F4 — remove the locked-wrapper name.
-                ctx.locked.remove(n);
-            } else {
-                check_expr(locked, ctx)?;
-            }
+            let target = locked_target(locked, ctx).ok_or_else(|| {
+                format!(
+                    "release_lock requires a locked resource; none of the referenced \
+                     resources {:?} are locked",
+                    referenced_vars(locked)
+                )
+            })?;
+            // Release restores Locked<T> to Linear<T>; the linear is *not*
+            // consumed. Remove the locked-wrapper name and spend the lock
+            // capability so the released lock can never be re-acquired. See
+            // F3/F4/F6.
+            ctx.locked.remove(&target);
+            ctx.lock_spent.insert(target);
             check_expr(witness, ctx)
         }
+    }
+}
+
+/// The underlying variable an expression *directly* names, peeling
+/// single-resource wrappers. Used to detect locked-resource access through
+/// projection/consumption. Multi-resource wrappers (Record with several
+/// fields, Call with several args) return `None` here — use
+/// [`referenced_vars`] for those.
+fn underlying_var(expr: &OpExpr) -> Option<String> {
+    match expr {
+        OpExpr::Var(n) => Some(n.clone()),
+        OpExpr::Field(base, _) => underlying_var(base),
+        OpExpr::ConsumeLinear(inner) => underlying_var(inner),
+        OpExpr::Lock { resource, .. } => underlying_var(resource),
+        OpExpr::CommitTransfer { locked, .. } | OpExpr::ReleaseLock { locked, .. } => {
+            underlying_var(locked)
+        }
+        _ => None,
+    }
+}
+
+/// Every variable name referenced anywhere inside an expression tree. Used to
+/// locate a locked resource through arbitrary Field/Record/Call wrapping so the
+/// lock check cannot be bypassed by indirection. See F3.
+fn referenced_vars(expr: &OpExpr) -> BTreeSet<String> {
+    let mut acc = BTreeSet::new();
+    collect_referenced_vars(expr, &mut acc);
+    acc
+}
+
+fn collect_referenced_vars(expr: &OpExpr, acc: &mut BTreeSet<String>) {
+    match expr {
+        OpExpr::Var(n) => {
+            acc.insert(n.clone());
+        }
+        OpExpr::Field(base, _) => collect_referenced_vars(base, acc),
+        OpExpr::Record(fields) => {
+            for (_, e) in fields {
+                collect_referenced_vars(e, acc);
+            }
+        }
+        OpExpr::Call(_, args) => {
+            for (_, e) in args {
+                collect_referenced_vars(e, acc);
+            }
+        }
+        OpExpr::List(items) | OpExpr::Tuple(items) => {
+            for e in items {
+                collect_referenced_vars(e, acc);
+            }
+        }
+        OpExpr::BinOp(_, a, b) | OpExpr::Coalesce(a, b) | OpExpr::Seq(a, b) => {
+            collect_referenced_vars(a, acc);
+            collect_referenced_vars(b, acc);
+        }
+        OpExpr::UnOp(_, a) | OpExpr::ConsumeLinear(a) => collect_referenced_vars(a, acc),
+        OpExpr::Lock { resource, .. } => collect_referenced_vars(resource, acc),
+        OpExpr::CommitTransfer { locked, witness } | OpExpr::ReleaseLock { locked, witness } => {
+            collect_referenced_vars(locked, acc);
+            collect_referenced_vars(witness, acc);
+        }
+        OpExpr::Match {
+            scrutinee,
+            arms,
+            catch_all,
+        } => {
+            collect_referenced_vars(scrutinee, acc);
+            for arm in arms {
+                collect_referenced_vars(&arm.body, acc);
+            }
+            collect_referenced_vars(catch_all, acc);
+        }
+        OpExpr::Unit
+        | OpExpr::Bool(_)
+        | OpExpr::Int(_)
+        | OpExpr::String(_)
+        | OpExpr::Null
+        | OpExpr::AssertSafety(_)
+        | OpExpr::Await { .. } => {}
+    }
+}
+
+/// Find the locked resource an eliminator (`commit_transfer`/`release_lock`)
+/// operates on, looking through any Field/Record/Call/Var wrapping. Returns the
+/// single locked variable if exactly one referenced variable is locked. If more
+/// than one referenced variable is locked the eliminator is ambiguous and we
+/// fail closed (`None` → caller rejects), because eliminating the wrong one (or
+/// silently both) would corrupt the affine accounting. See F3.
+fn locked_target(expr: &OpExpr, ctx: &TypeContext) -> Option<String> {
+    // Fast path: a directly-named locked variable (Var or single-resource
+    // projection) — the common, unambiguous case.
+    if let Some(n) = underlying_var(expr) {
+        if ctx.is_locked(&n) {
+            return Some(n);
+        }
+    }
+    // Wrapped path: scan every referenced variable for a locked one.
+    let locked_refs: Vec<String> = referenced_vars(expr)
+        .into_iter()
+        .filter(|n| ctx.is_locked(n))
+        .collect();
+    match locked_refs.as_slice() {
+        [single] => Some(single.clone()),
+        _ => None, // zero locked (reject: not locked) or ambiguous (fail closed)
     }
 }
 
@@ -746,17 +1011,30 @@ fn static_expr_type(expr: &OpExpr, ctx: &TypeContext) -> Result<OpType, String> 
                 .ok_or_else(|| format!("unknown record field: {field}")),
             other => Err(format!("field access on non-record type: {other:?}")),
         },
-        OpExpr::Record(fields) => fields
-            .iter()
-            .map(|(name, value)| Ok((name.clone(), static_expr_type(value, ctx)?)))
-            .collect::<Result<Vec<_>, _>>()
-            .map(|field_types| {
-                if is_encoded_variant_record(fields) {
-                    OpType::Variant(vec![])
-                } else {
-                    OpType::Record(field_types)
-                }
-            }),
+        OpExpr::Record(fields) => {
+            let field_types = fields
+                .iter()
+                .map(|(name, value)| Ok((name.clone(), static_expr_type(value, ctx)?)))
+                .collect::<Result<Vec<_>, String>>()?;
+            // An encoded `{tag: "Ctor", value: V}` record denotes ONE variant
+            // case. The old code typed it as `Variant(vec![])` — an empty
+            // constructor list — which made every `match` on it vacuously
+            // exhaustive (no constructor to cover). Populate the actual single
+            // constructor from the literal tag and the value's type, so a match
+            // on this value must cover that constructor. See F8.
+            if is_encoded_variant_record(fields) {
+                let tag = encoded_variant_tag(fields).ok_or_else(|| {
+                    "encoded variant record `tag` must be a string literal".to_string()
+                })?;
+                let value_ty = field_types
+                    .iter()
+                    .find_map(|(n, ty)| (n == "value").then(|| ty.clone()))
+                    .unwrap_or(OpType::Unit);
+                Ok(OpType::Variant(vec![(tag, value_ty)]))
+            } else {
+                Ok(OpType::Record(field_types))
+            }
+        }
         OpExpr::List(items) => {
             let mut item_ty: Option<OpType> = None;
             for item in items {
@@ -778,11 +1056,23 @@ fn static_expr_type(expr: &OpExpr, ctx: &TypeContext) -> Result<OpType, String> 
             .map(|item| static_expr_type(item, ctx))
             .collect::<Result<Vec<_>, _>>()
             .map(OpType::Tuple),
-        OpExpr::Call(name, _) => Ok(match name.as_str() {
-            "sanctions.check" => op_verdict_variant(),
-            "attestation.append" => OpType::Record(vec![]),
-            _ => OpType::Record(vec![]),
-        }),
+        OpExpr::Call(name, _) => match name.as_str() {
+            "sanctions.check" => Ok(op_verdict_variant()),
+            "attestation.append" => Ok(OpType::Record(vec![])),
+            // An unknown primitive has a host-determined return shape the
+            // checker cannot know. Silently typing it as an empty record let
+            // any downstream type flow through unchecked (e.g. a match on its
+            // result would see no constructors and skip exhaustiveness). Fail
+            // loud instead of fabricating a type. See F9. (`Statement::Run` /
+            // `Statement::Par` still bind a record placeholder explicitly for
+            // the host-determined call result; they do not route through this
+            // inference path.)
+            other => Err(format!(
+                "cannot infer the type of unknown primitive call `{other}`; \
+                 its return type is host-determined and must be bound via `run`/`par`, \
+                 not used directly in a type-inference position"
+            )),
+        },
         OpExpr::BinOp(op, left, right) => {
             let left_ty = static_expr_type(left, ctx)?;
             let right_ty = static_expr_type(right, ctx)?;
@@ -860,9 +1150,44 @@ fn static_expr_type(expr: &OpExpr, ctx: &TypeContext) -> Result<OpType, String> 
         OpExpr::Lock { resource, .. } => {
             Ok(OpType::Locked(Box::new(static_expr_type(resource, ctx)?)))
         }
-        OpExpr::CommitTransfer { locked, .. } | OpExpr::ReleaseLock { locked, .. } => {
-            static_expr_type(locked, ctx)
+        // commit_transfer destructures the `Locked<T>` wrapper and yields the
+        // committed value `T`. release_lock destructures `Locked<Linear<T>>`
+        // back to the unconsumed `Linear<T>`. Returning the `Locked<…>` wrapper
+        // itself (the old behaviour) was unsound: the result would still type
+        // as locked, so a single lock could be eliminated and then the
+        // "result" eliminated again. See F5.
+        OpExpr::CommitTransfer { locked, .. } => {
+            let inner = static_expr_type(locked, ctx)?;
+            Ok(committed_value_type(&inner))
         }
+        OpExpr::ReleaseLock { locked, .. } => {
+            let inner = static_expr_type(locked, ctx)?;
+            Ok(released_linear_type(&inner))
+        }
+    }
+}
+
+/// Destructure a locked handle's type to the value produced by committing it.
+/// `Locked<Linear<T>>` → `T`; `Locked<T>` → `T`; `Linear<T>` → `T` (a Var bound
+/// `Linear<T>` whose lock state lives in the lock set, not the binding); any
+/// other type is returned unchanged (best-effort; the affinity check in
+/// `check_expr` is what enforces the lock requirement). See F5.
+fn committed_value_type(handle: &OpType) -> OpType {
+    match handle {
+        OpType::Locked(inner) => committed_value_type(inner),
+        OpType::Linear(inner) => inner.as_ref().clone(),
+        other => other.clone(),
+    }
+}
+
+/// Destructure a locked handle's type back to the `Linear<T>` that releasing it
+/// restores. `Locked<Linear<T>>` → `Linear<T>`; `Locked<T>` → `Linear<T>`;
+/// `Linear<T>` → `Linear<T>` (already restored shape). See F5.
+fn released_linear_type(handle: &OpType) -> OpType {
+    match handle {
+        OpType::Locked(inner) => released_linear_type(inner),
+        linear @ OpType::Linear(_) => linear.clone(),
+        other => OpType::Linear(Box::new(other.clone())),
     }
 }
 
@@ -874,6 +1199,19 @@ fn is_encoded_variant_record(fields: &[(String, OpExpr)]) -> bool {
             (value_name, _)
         ] if tag_name == "tag" && value_name == "value"
     )
+}
+
+/// Extract the literal constructor tag from an encoded variant record
+/// `{tag: "Ctor", value: V}`. See F8.
+fn encoded_variant_tag(fields: &[(String, OpExpr)]) -> Option<String> {
+    match fields {
+        [(tag_name, OpExpr::String(tag)), (value_name, _)]
+            if tag_name == "tag" && value_name == "value" =>
+        {
+            Some(tag.clone())
+        }
+        _ => None,
+    }
 }
 
 fn match_binding_type(scrutinee_ty: &OpType, pattern: &str) -> Result<OpType, String> {
@@ -1449,5 +1787,603 @@ mod tests {
             "expected declared effects to pass: {:?}",
             res.errors
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // Soundness regression tests (22-agent audit closures). Each test proves a
+    // confirmed linearity/affinity soundness gap is now actually enforced.
+    // -----------------------------------------------------------------------
+
+    fn linear_ctx(name: &str) -> TypeContext {
+        let mut ctx = TypeContext::new();
+        ctx.bind(name.to_string(), OpType::Linear(Box::new(OpType::String)));
+        ctx
+    }
+
+    /// F1 — double-consume must be REPORTED in `linearity_violations`, not just
+    /// rejected via an error string. (The old intersection filter was always
+    /// empty so the field was never populated.) WHY: downstream tooling and
+    /// proof bundles read `linearity_violations` as the canonical list of
+    /// linearity faults; an always-empty list is a silent soundness hole.
+    #[test]
+    fn f1_double_consume_is_surfaced_in_linearity_violations() {
+        let prog = trivial_program(vec![
+            Statement::Let {
+                name: "share".to_string(),
+                ty: OpType::Linear(Box::new(OpType::String)),
+                value: OpExpr::String("s".to_string()),
+            },
+            // Consume the same linear twice in one branch.
+            Statement::Expr(OpExpr::ConsumeLinear(Box::new(OpExpr::Var(
+                "share".to_string(),
+            )))),
+            Statement::Expr(OpExpr::ConsumeLinear(Box::new(OpExpr::Var(
+                "share".to_string(),
+            )))),
+        ]);
+        let res = typecheck_program(&prog);
+        assert!(!res.success, "double-consume must fail");
+        assert!(
+            res.linearity_violations.contains(&"share".to_string()),
+            "double-consume must be surfaced in linearity_violations, got {:?}",
+            res.linearity_violations
+        );
+    }
+
+    /// F1 — a clean program reports NO linearity violations (the field is not
+    /// spuriously populated). WHY: a test that only checks the positive case
+    /// can pass against a field that is always non-empty.
+    #[test]
+    fn f1_clean_program_has_no_linearity_violations() {
+        let prog = trivial_program(vec![
+            Statement::Let {
+                name: "share".to_string(),
+                ty: OpType::Linear(Box::new(OpType::String)),
+                value: OpExpr::String("s".to_string()),
+            },
+            Statement::Expr(OpExpr::ConsumeLinear(Box::new(OpExpr::Var(
+                "share".to_string(),
+            )))),
+        ]);
+        let res = typecheck_program(&prog);
+        assert!(res.success, "clean program: {:?}", res.errors);
+        assert!(
+            res.linearity_violations.is_empty(),
+            "clean program must report no linearity violations, got {:?}",
+            res.linearity_violations
+        );
+    }
+
+    /// F2 — a bare `Var` reference to a locked resource is direct access that
+    /// bypasses the two canonical eliminators. It must be rejected. WHY:
+    /// `Locked<T>` is affine with EXACTLY two eliminators; reading it directly
+    /// would let a locked resource be used while it is mid-three-phase-commit.
+    #[test]
+    fn f2_locked_var_direct_access_is_rejected() {
+        let mut ctx = linear_ctx("share");
+        let lock = OpExpr::Lock {
+            resource: Box::new(OpExpr::Var("share".to_string())),
+            corridor_id: "corr-a".to_string(),
+        };
+        assert!(check_expr(&lock, &mut ctx).is_ok());
+        let direct = OpExpr::Var("share".to_string());
+        let err = check_expr(&direct, &mut ctx).unwrap_err();
+        assert!(
+            err.contains("locked-resource-access"),
+            "locked var must be rejected on direct access, got: {err}"
+        );
+    }
+
+    /// F4 — field access of a locked resource must be rejected; the `Locked<T>`
+    /// wrapper cannot be peeled by projection. WHY: `account.balance` where
+    /// `account` is locked would otherwise read through the lock.
+    #[test]
+    fn f4_field_access_of_locked_resource_is_rejected() {
+        let mut ctx = TypeContext::new();
+        ctx.bind(
+            "account".to_string(),
+            OpType::Linear(Box::new(OpType::Record(vec![(
+                "balance".to_string(),
+                OpType::Int,
+            )]))),
+        );
+        let lock = OpExpr::Lock {
+            resource: Box::new(OpExpr::Var("account".to_string())),
+            corridor_id: "corr-a".to_string(),
+        };
+        assert!(check_expr(&lock, &mut ctx).is_ok());
+        let field = OpExpr::Field(Box::new(OpExpr::Var("account".to_string())), "balance".to_string());
+        let err = check_expr(&field, &mut ctx).unwrap_err();
+        assert!(
+            err.contains("locked-resource-access"),
+            "field access of locked resource must be rejected, got: {err}"
+        );
+    }
+
+    /// F3 — the lock check must NOT be bypassable by wrapping the locked handle
+    /// in a Field/Record/Call. `commit_transfer` on `{h: locked_var}` must
+    /// still find the locked resource and eliminate it. WHY: an unenforced
+    /// wrapped commit would leave the resource locked AND committed — double
+    /// elimination.
+    #[test]
+    fn f3_commit_through_wrapper_still_eliminates_lock() {
+        let mut ctx = linear_ctx("share");
+        let lock = OpExpr::Lock {
+            resource: Box::new(OpExpr::Var("share".to_string())),
+            corridor_id: "corr-a".to_string(),
+        };
+        assert!(check_expr(&lock, &mut ctx).is_ok());
+        assert!(ctx.is_locked("share"));
+        // Commit through a Record wrapper.
+        let commit = OpExpr::CommitTransfer {
+            locked: Box::new(OpExpr::Record(vec![(
+                "h".to_string(),
+                OpExpr::Var("share".to_string()),
+            )])),
+            witness: Box::new(OpExpr::Unit),
+        };
+        assert!(
+            check_expr(&commit, &mut ctx).is_ok(),
+            "commit through wrapper of a locked resource must succeed"
+        );
+        // The lock was actually eliminated and the linear consumed.
+        assert!(!ctx.is_locked("share"), "wrapper-commit must clear the lock");
+        assert!(ctx.is_consumed("share"), "wrapper-commit must consume the linear");
+        // A second elimination through the same wrapper must now fail (no
+        // locked resource remains) — proving the first commit was not a no-op.
+        let commit_again = OpExpr::CommitTransfer {
+            locked: Box::new(OpExpr::Record(vec![(
+                "h".to_string(),
+                OpExpr::Var("share".to_string()),
+            )])),
+            witness: Box::new(OpExpr::Unit),
+        };
+        assert!(
+            check_expr(&commit_again, &mut ctx).is_err(),
+            "double commit through wrapper must be rejected"
+        );
+    }
+
+    /// F3 — commit_transfer on a wrapper that references NO locked resource is
+    /// rejected (it does not silently pass). WHY: the eliminator's whole point
+    /// is to consume a locked resource; an unlocked argument is a type error.
+    #[test]
+    fn f3_commit_through_wrapper_without_lock_is_rejected() {
+        let mut ctx = linear_ctx("share");
+        // `share` is NOT locked.
+        let commit = OpExpr::CommitTransfer {
+            locked: Box::new(OpExpr::Record(vec![(
+                "h".to_string(),
+                OpExpr::Var("share".to_string()),
+            )])),
+            witness: Box::new(OpExpr::Unit),
+        };
+        let err = check_expr(&commit, &mut ctx).unwrap_err();
+        assert!(
+            err.contains("requires a locked resource"),
+            "wrapped commit of an unlocked resource must be rejected, got: {err}"
+        );
+    }
+
+    /// F3 — release_lock through a Field wrapper still eliminates the lock.
+    #[test]
+    fn f3_release_through_field_wrapper_still_eliminates_lock() {
+        let mut ctx = TypeContext::new();
+        ctx.bind(
+            "account".to_string(),
+            OpType::Linear(Box::new(OpType::Record(vec![(
+                "h".to_string(),
+                OpType::String,
+            )]))),
+        );
+        let lock = OpExpr::Lock {
+            resource: Box::new(OpExpr::Var("account".to_string())),
+            corridor_id: "corr-a".to_string(),
+        };
+        assert!(check_expr(&lock, &mut ctx).is_ok());
+        let release = OpExpr::ReleaseLock {
+            locked: Box::new(OpExpr::Field(
+                Box::new(OpExpr::Var("account".to_string())),
+                "h".to_string(),
+            )),
+            witness: Box::new(OpExpr::Unit),
+        };
+        assert!(
+            check_expr(&release, &mut ctx).is_ok(),
+            "release through field wrapper must succeed"
+        );
+        assert!(!ctx.is_locked("account"), "release must clear the lock");
+        assert!(!ctx.is_consumed("account"), "release must not consume the linear");
+    }
+
+    /// F5 — commit_transfer destructures `Locked<T>` and yields the committed
+    /// value `T` (NOT the `Locked<T>` wrapper). WHY: returning the locked
+    /// wrapper would type the commit result as still-locked, permitting a
+    /// second elimination of the same resource.
+    #[test]
+    fn f5_commit_transfer_returns_unwrapped_value_type() {
+        let ctx = TypeContext::new();
+        // Inline lock produces `Locked<Linear<String>>`; commit must unwrap to
+        // the committed value `String`.
+        let commit = OpExpr::CommitTransfer {
+            locked: Box::new(OpExpr::Lock {
+                resource: Box::new(OpExpr::String("s".to_string())),
+                corridor_id: "c".to_string(),
+            }),
+            witness: Box::new(OpExpr::Unit),
+        };
+        let ty = static_expr_type(&commit, &ctx).unwrap();
+        assert_eq!(
+            ty,
+            OpType::String,
+            "commit_transfer must yield the unwrapped committed value type, got {ty:?}"
+        );
+    }
+
+    /// F5 — release_lock destructures `Locked<Linear<T>>` back to the
+    /// unconsumed `Linear<T>`. WHY: a released resource must remain visibly
+    /// linear so downstream double-use is still caught.
+    #[test]
+    fn f5_release_lock_returns_linear_type() {
+        let ctx = TypeContext::new();
+        let release = OpExpr::ReleaseLock {
+            locked: Box::new(OpExpr::Lock {
+                resource: Box::new(OpExpr::String("s".to_string())),
+                corridor_id: "c".to_string(),
+            }),
+            witness: Box::new(OpExpr::Unit),
+        };
+        let ty = static_expr_type(&release, &ctx).unwrap();
+        assert_eq!(
+            ty,
+            OpType::Linear(Box::new(OpType::String)),
+            "release_lock must yield Linear<T>, got {ty:?}"
+        );
+    }
+
+    /// F6 — after release_lock, the lock capability is spent; re-locking the
+    /// same resource must be rejected. WHY: lock/release/lock/commit would let
+    /// one linear resource be transferred across two corridors.
+    #[test]
+    fn f6_relock_after_release_is_rejected() {
+        let mut ctx = linear_ctx("share");
+        let lock = || OpExpr::Lock {
+            resource: Box::new(OpExpr::Var("share".to_string())),
+            corridor_id: "corr-a".to_string(),
+        };
+        assert!(check_expr(&lock(), &mut ctx).is_ok());
+        let release = OpExpr::ReleaseLock {
+            locked: Box::new(OpExpr::Var("share".to_string())),
+            witness: Box::new(OpExpr::Unit),
+        };
+        assert!(check_expr(&release, &mut ctx).is_ok());
+        assert!(!ctx.is_consumed("share"), "release does not consume");
+        // Re-lock must now be rejected.
+        let err = check_expr(&lock(), &mut ctx).unwrap_err();
+        assert!(
+            err.contains("lock-after-release"),
+            "re-locking a released resource must be rejected, got: {err}"
+        );
+    }
+
+    /// F6 — after commit_transfer, the resource is both consumed and its lock
+    /// capability spent; re-locking is rejected (use-after-consume / spent).
+    #[test]
+    fn f6_relock_after_commit_is_rejected() {
+        let mut ctx = linear_ctx("share");
+        let lock = OpExpr::Lock {
+            resource: Box::new(OpExpr::Var("share".to_string())),
+            corridor_id: "corr-a".to_string(),
+        };
+        assert!(check_expr(&lock, &mut ctx).is_ok());
+        let commit = OpExpr::CommitTransfer {
+            locked: Box::new(OpExpr::Var("share".to_string())),
+            witness: Box::new(OpExpr::Unit),
+        };
+        assert!(check_expr(&commit, &mut ctx).is_ok());
+        let relock = OpExpr::Lock {
+            resource: Box::new(OpExpr::Var("share".to_string())),
+            corridor_id: "corr-b".to_string(),
+        };
+        assert!(
+            check_expr(&relock, &mut ctx).is_err(),
+            "re-locking a committed resource must be rejected"
+        );
+    }
+
+    /// F6 — double-lock (locking an already-locked resource without
+    /// release/commit) is rejected.
+    #[test]
+    fn f6_double_lock_is_rejected() {
+        let mut ctx = linear_ctx("share");
+        let lock = || OpExpr::Lock {
+            resource: Box::new(OpExpr::Var("share".to_string())),
+            corridor_id: "corr-a".to_string(),
+        };
+        assert!(check_expr(&lock(), &mut ctx).is_ok());
+        let err = check_expr(&lock(), &mut ctx).unwrap_err();
+        assert!(
+            err.contains("double-lock"),
+            "double-lock must be rejected, got: {err}"
+        );
+    }
+
+    /// F7 — asymmetric consumption obligations are surfaced in the result. WHY:
+    /// `branch_asymmetric_consumptions` was tracked but never returned, so a
+    /// caller could not see which linear resources were consumed on only some
+    /// branches.
+    #[test]
+    fn f7_asymmetric_consumption_is_surfaced_in_result() {
+        let prog = trivial_program(vec![
+            Statement::Let {
+                name: "share".to_string(),
+                ty: OpType::Linear(Box::new(OpType::String)),
+                value: OpExpr::String("s".to_string()),
+            },
+            Statement::Choose {
+                arms: vec![(
+                    OpExpr::Bool(true),
+                    vec![Statement::Expr(OpExpr::ConsumeLinear(Box::new(
+                        OpExpr::Var("share".to_string()),
+                    )))],
+                )],
+                else_block: Some(vec![Statement::Expr(OpExpr::Unit)]),
+            },
+        ]);
+        let res = typecheck_program(&prog);
+        assert!(
+            res.asymmetric_consumption_obligations
+                .contains(&"share".to_string()),
+            "asymmetric consumption of `share` must be surfaced, got {:?}",
+            res.asymmetric_consumption_obligations
+        );
+    }
+
+    /// F8 — an encoded variant record `{tag, value}` must NOT type as an empty
+    /// variant; a match on it must enforce exhaustiveness over the real
+    /// constructor. WHY: an empty constructor list made every match vacuously
+    /// exhaustive, defeating coverage checking.
+    #[test]
+    fn f8_encoded_variant_record_populates_constructor() {
+        let ctx = TypeContext::new();
+        let encoded = OpExpr::Record(vec![
+            ("tag".to_string(), OpExpr::String("Approved".to_string())),
+            ("value".to_string(), OpExpr::Int(7)),
+        ]);
+        let ty = static_expr_type(&encoded, &ctx).unwrap();
+        assert_eq!(
+            ty,
+            OpType::Variant(vec![("Approved".to_string(), OpType::Int)]),
+            "encoded variant record must carry its real constructor, got {ty:?}"
+        );
+        // A match missing the `Approved` arm must now be rejected (was
+        // vacuously accepted under the empty-variant typing).
+        let m = OpExpr::Match {
+            scrutinee: Box::new(encoded),
+            arms: vec![],
+            catch_all: Box::new(OpExpr::Unit),
+        };
+        let err = static_expr_type(&m, &ctx).unwrap_err();
+        assert!(
+            err.contains("missing constructor arm `Approved`"),
+            "match on encoded variant must require its constructor, got: {err}"
+        );
+    }
+
+    /// F9 — an unknown primitive call used in a type-inference position is
+    /// rejected, not silently typed as an empty record. WHY: silent empty-record
+    /// typing let any downstream type flow through unchecked.
+    #[test]
+    fn f9_unknown_primitive_call_inference_is_rejected() {
+        let ctx = TypeContext::new();
+        let call = OpExpr::Call("unknown.primitive".to_string(), vec![]);
+        let err = static_expr_type(&call, &ctx).unwrap_err();
+        assert!(
+            err.contains("unknown primitive call"),
+            "unknown primitive call must fail inference, got: {err}"
+        );
+    }
+
+    /// F9 — the `run` placeholder-binding path is preserved (a `run name = prim()`
+    /// binds the host-determined record placeholder and does NOT route through
+    /// the `static_expr_type(Call)` inference that F9 now fails loud on). Uses a
+    /// recognized primitive so the orthogonal effect-row check (which rejects
+    /// primitives with no canonical effects) is satisfied. WHY: F9 must reject
+    /// the inference position WITHOUT breaking the legitimate `run` binding.
+    #[test]
+    fn f9_run_binding_placeholder_path_is_preserved() {
+        let mut prog = trivial_program(vec![
+            Statement::Run {
+                name: "r".to_string(),
+                call: OpExpr::Call("attestation.append".to_string(), vec![]),
+            },
+            Statement::Return(OpExpr::Var("r".to_string())),
+        ]);
+        prog.effects = vec![Effect::ProofEmit];
+        let res = typecheck_program(&prog);
+        assert!(
+            res.success,
+            "run-bound recognized primitive must typecheck (placeholder path): {:?}",
+            res.errors
+        );
+    }
+
+    /// F10 — an extensional gas bound that overflows u64 is rejected (was
+    /// silently saturated to u64::MAX). WHY: a saturated cap is a fabricated,
+    /// valid-looking bound for a program whose true cost is unrepresentable.
+    #[test]
+    fn f10_extensional_gas_overflow_is_rejected() {
+        let mut prog = trivial_program(vec![]);
+        prog.gas_budget = GasBudget {
+            structural_gas: 0,
+            per_element_gas: u64::MAX,
+            cardinality_certificate: Some(CardinalityCertificate {
+                query: "q".to_string(),
+                cardinality: 2,
+                as_of: "2026-01-01T00:00:00Z".to_string(),
+                signature: "sig".to_string(),
+            }),
+        };
+        let res = typecheck_program(&prog);
+        assert!(!res.success, "overflowing extensional bound must be rejected");
+        assert!(
+            res.errors
+                .iter()
+                .any(|e| e.contains("extensional gas bound overflows u64")),
+            "overflow must be surfaced, got {:?}",
+            res.errors
+        );
+    }
+
+    /// F10 — a representable extensional bound is computed exactly (no spurious
+    /// rejection, and the value is the true product).
+    #[test]
+    fn f10_representable_extensional_bound_is_exact() {
+        let mut prog = trivial_program(vec![]);
+        prog.gas_budget = GasBudget {
+            structural_gas: 0,
+            per_element_gas: 10,
+            cardinality_certificate: Some(CardinalityCertificate {
+                query: "q".to_string(),
+                cardinality: 4300,
+                as_of: "2026-01-01T00:00:00Z".to_string(),
+                signature: "sig".to_string(),
+            }),
+        };
+        let res = typecheck_program(&prog);
+        assert!(res.success, "representable bound: {:?}", res.errors);
+        assert_eq!(
+            res.gas_analysis.unwrap().max_extensional_gas,
+            Some(43_000)
+        );
+    }
+
+    /// F11 — `AssertSafety` buried inside a match arm body is still fail-loud
+    /// (no silent-accept path through nested expressions). WHY: a bare safety
+    /// predicate with no verified receipt must never be accepted, regardless of
+    /// nesting.
+    #[test]
+    fn f11_nested_assert_safety_fails_loud() {
+        let prog = trivial_program(vec![Statement::Expr(OpExpr::Match {
+            scrutinee: Box::new(OpExpr::Bool(true)),
+            arms: vec![
+                MatchArm {
+                    pattern: "true".to_string(),
+                    binding: "_".to_string(),
+                    body: OpExpr::AssertSafety(SafetyPredicate::NoGroupFormationBypass),
+                },
+                MatchArm {
+                    pattern: "false".to_string(),
+                    binding: "_".to_string(),
+                    body: OpExpr::Unit,
+                },
+            ],
+            catch_all: Box::new(OpExpr::Unit),
+        })]);
+        let res = typecheck_program(&prog);
+        assert!(!res.success, "nested bare AssertSafety must fail");
+        assert!(
+            res.errors
+                .iter()
+                .any(|e| e.contains("requires a verified receipt")),
+            "nested AssertSafety must surface the receipt error, got {:?}",
+            res.errors
+        );
+    }
+
+    /// F11 — a `policy` block with no verified proof receipt is rejected (the
+    /// gate is not vacuous).
+    #[test]
+    fn f11_policy_block_requires_receipt() {
+        let prog = trivial_program(vec![Statement::Policy {
+            name: "kyc".to_string(),
+            domains: vec!["Kyc".to_string()],
+        }]);
+        let res = typecheck_program(&prog);
+        assert!(!res.success, "policy block must require a receipt");
+        assert!(res
+            .errors
+            .iter()
+            .any(|e| e.contains("requires a verified proof receipt")));
+    }
+
+    /// F-MEDIUM (initializer asymmetry) — a `let x: T = <Linear<T> initializer>`
+    /// binds the linear type so x stays single-use and downstream double-use is
+    /// caught. WHY: binding the bare annotation would erase the linearity and
+    /// silently permit reuse.
+    #[test]
+    fn f_medium_let_preserves_linearity_from_initializer() {
+        // value `lock(...)`-less: use a Var bound Linear, re-bound via let with
+        // a bare annotation. Build a program: outer linear `src`, then
+        // `let aliased: String = src` (annotation bare String, initializer
+        // Linear<String>) — the binding must remain Linear<String> so consuming
+        // `aliased` twice is rejected.
+        let prog = trivial_program(vec![
+            Statement::Let {
+                name: "src".to_string(),
+                ty: OpType::Linear(Box::new(OpType::String)),
+                value: OpExpr::String("s".to_string()),
+            },
+            Statement::Let {
+                name: "aliased".to_string(),
+                ty: OpType::String,
+                value: OpExpr::Var("src".to_string()),
+            },
+            Statement::Expr(OpExpr::ConsumeLinear(Box::new(OpExpr::Var(
+                "aliased".to_string(),
+            )))),
+            Statement::Expr(OpExpr::ConsumeLinear(Box::new(OpExpr::Var(
+                "aliased".to_string(),
+            )))),
+        ]);
+        let res = typecheck_program(&prog);
+        assert!(
+            !res.success,
+            "double-consume of a linearly-initialized binding must be rejected"
+        );
+        assert!(
+            res.linearity_violations.contains(&"aliased".to_string()),
+            "the re-bound name must remain linear and surface a violation, got {:?}",
+            res.linearity_violations
+        );
+    }
+
+    /// F-MEDIUM (structural gas) — a structural gas bound exceeding the declared
+    /// budget is surfaced as an error. WHY: a declared budget that the skeleton
+    /// provably overruns is a budget violation the checker must not ignore.
+    #[test]
+    fn f_medium_structural_gas_over_budget_is_surfaced() {
+        // A program with a non-trivial body costs > 0 structurally. Declare an
+        // impossibly tight budget of 1 and confirm the overrun is surfaced.
+        let prog_unbudgeted = {
+            let mut p = trivial_program(vec![
+                Statement::Expr(OpExpr::Unit),
+                Statement::Return(OpExpr::Unit),
+            ]);
+            p.gas_budget = GasBudget::default();
+            p
+        };
+        let baseline = typecheck_program(&prog_unbudgeted);
+        let structural = baseline.gas_analysis.unwrap().structural_bound;
+        // Only meaningful if the skeleton has positive structural cost.
+        if structural > 0 {
+            let mut prog = trivial_program(vec![
+                Statement::Expr(OpExpr::Unit),
+                Statement::Return(OpExpr::Unit),
+            ]);
+            prog.gas_budget = GasBudget {
+                structural_gas: 1,
+                per_element_gas: 0,
+                cardinality_certificate: None,
+            };
+            let res = typecheck_program(&prog);
+            assert!(
+                res.errors
+                    .iter()
+                    .any(|e| e.contains("structural gas bound") && e.contains("exceeds declared budget")),
+                "over-budget structural gas must be surfaced, got {:?}",
+                res.errors
+            );
+        }
     }
 }
