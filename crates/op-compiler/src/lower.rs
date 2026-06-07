@@ -109,6 +109,13 @@ pub enum LoweringError {
         errors: Vec<String>,
     },
 
+    /// Computing the compiled program's content address failed (the program
+    /// could not be serialized to its canonical byte form). Surfaced rather
+    /// than hashing the empty string, which would mint a meaningless,
+    /// collision-prone content id.
+    #[error("content addressing failed: {0}")]
+    ContentAddress(String),
+
     /// A step declared an `on_failure` policy the lowerer does not recognize.
     /// Silently dropping it would default the step to `CancelOperation`, which
     /// is a different (and possibly far weaker or stronger) failure semantics

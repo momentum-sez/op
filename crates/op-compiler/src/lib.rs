@@ -65,7 +65,8 @@ pub fn compile_yaml(yaml: &str) -> Result<CompiledProgram, LoweringError> {
             .map(|g| g.needs_cardinality_cert)
             .unwrap_or(false),
     };
-    let content_address = content_address(&report.program);
+    let content_address = content_address(&report.program)
+        .map_err(|e| LoweringError::ContentAddress(e.to_string()))?;
     Ok(CompiledProgram {
         program: report.program,
         content_address,

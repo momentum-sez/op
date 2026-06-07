@@ -646,15 +646,20 @@ fn walk_expr_effects_into(expr: &OpExpr, out: &mut Vec<WalkedCall>) {
     }
 }
 
-/// Canonical primitive effect table.
+/// Canonical primitive effect table — the single source of truth for the
+/// default effect row of every canonical primitive.
 ///
-/// Mirrors the shapes op-stdlib carries in `CANONICAL_PRIMITIVES`. op-core
-/// cannot depend on op-stdlib (stdlib depends on core), so the shape table
-/// is inlined here. A primitive name not present returns an empty effect
-/// row for aggregation only. Safety checking rejects unknown expression
-/// calls explicitly; embedders must not rely on host rejection as an effect
-/// proof.
-pub(crate) fn canonical_effects_for(name: &str) -> Vec<Effect> {
+/// op-core cannot depend on op-stdlib (stdlib depends on core), so the shape
+/// table lives here and op-stdlib's `CANONICAL_PRIMITIVES` derives its effect
+/// rows from this function (see `op_stdlib::default_effects`). A primitive name
+/// not present returns an empty effect row **for aggregation only**; this is not
+/// a silent admission. Safety checking rejects unknown step/expression calls
+/// explicitly (`EffectSafetyError::UnknownPrimitive`), so an unknown primitive
+/// never passes the gate with an empty row — embedders must not rely on host
+/// rejection as an effect proof. The
+/// `op_stdlib::stdlib_effects_match_op_core` parity test pins op-stdlib's
+/// corpus to this table across the full primitive set.
+pub fn canonical_effects_for(name: &str) -> Vec<Effect> {
     match name {
         // Entity
         "create.entity" => vec![Effect::SovereignWrite],
@@ -745,7 +750,13 @@ pub(crate) fn canonical_primitive_known(name: &str) -> bool {
 /// discipline at the level with the looser predicate. Both levels MUST consult
 /// this function. The `levels_agree_on_deferred_subject_set` test pins the
 /// agreement across the full canonical primitive set.
-pub(crate) fn canonical_is_deferred_subject(name: &str) -> bool {
+///
+/// This is also the single source of truth for op-stdlib's `deferred_subject`
+/// column: `op_stdlib::is_deferred_subject` resolves through this function, and
+/// the `op_stdlib::stdlib_deferred_subject_matches_op_core` parity test binds
+/// the two so the sanctions-domination exemption set cannot drift across the
+/// crate boundary. The exemption set MUST stay exactly `{create.entity}`.
+pub fn canonical_is_deferred_subject(name: &str) -> bool {
     matches!(name, "create.entity")
 }
 

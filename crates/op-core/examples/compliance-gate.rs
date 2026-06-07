@@ -6,8 +6,12 @@
 //! What this shows: a tiny policy — "deny if the counterparty's
 //! jurisdiction is on the sanctions list AND the transfer amount exceeds
 //! the declared threshold" — encoded as an Op program and executed
-//! against a rule-aware host. The verdict that comes out the other side
-//! is the shape of an Op proof certificate:
+//! against a rule-aware host. The amount threshold is a *host* policy
+//! input, not a kernel primitive, so the program is a single canonical
+//! `screening.sanctions` step and the host folds the jurisdiction + amount
+//! decision into that one screen — Op carries the scaffolding, the host
+//! carries the policy. The verdict that comes out the other side is the
+//! shape of an Op proof certificate:
 //!
 //!   - a content-addressed program digest (what was executed),
 //!   - the composed effect row (what it was allowed to touch),
@@ -158,11 +162,16 @@ fn render_certificate(
     println!("verdict         : {verdict_label}  ({})", verdict.reason);
 }
 
-/// The program: a jurisdiction screen followed by a low-value check.
-/// The `screening.sanctions` step carries the sanctions-check effect that
-/// dominates the downstream writes (there are no writes in this demo —
-/// the workflow is a pure admission gate — but the same shape extends
-/// to write-bearing flows without changing the typechecker's reasoning).
+/// The program: a single canonical `screening.sanctions` step. The screen
+/// carries the `sanctions_check` effect — the gate that, in a write-bearing
+/// flow, dominates every downstream `sovereign_write` / `fiscal_transfer`.
+/// There are no writes in this demo (the workflow is a pure admission gate),
+/// but the same shape extends to write-bearing flows without changing the
+/// typechecker's reasoning. The amount threshold is a host policy input
+/// (`LOW_VALUE_THRESHOLD_MINOR_UNITS`), folded into the screen by `RuleHost`,
+/// not a separate kernel primitive — so the program stays inside the canonical
+/// corpus. The program returns no value; the admit/deny verdict is derived by
+/// the host loop from the screen's outcome, so `outputs` is empty.
 fn build_program() -> OpProgram {
     let screen = OpStep {
         id: "screen".to_string(),
@@ -177,31 +186,6 @@ fn build_program() -> OpProgram {
             input: OpType::JurisdictionRef,
             output: OpType::Bool,
             effects: vec![Effect::SanctionsCheck, Effect::ExternalRead],
-        },
-        wait: None,
-        on_failure: None,
-        compensate: None,
-        contracts: Contracts::default(),
-    };
-    let threshold = OpStep {
-        id: "threshold".to_string(),
-        body: StepBody::Primitive(
-            Primitive("fiscal.threshold_check".to_string()),
-            vec![
-                ("amount".to_string(), OpExpr::Var("amount".to_string())),
-                (
-                    "threshold".to_string(),
-                    OpExpr::Int(LOW_VALUE_THRESHOLD_MINOR_UNITS),
-                ),
-            ],
-        ),
-        signature: StepSignature {
-            input: OpType::Record(vec![
-                ("amount".to_string(), OpType::Int),
-                ("threshold".to_string(), OpType::Int),
-            ]),
-            output: OpType::Bool,
-            effects: vec![Effect::Pure],
         },
         wait: None,
         on_failure: None,
@@ -225,12 +209,12 @@ fn build_program() -> OpProgram {
             ),
             ("amount".to_string(), OpType::Int),
         ],
-        outputs: vec![("admit".to_string(), OpType::Bool)],
+        outputs: vec![],
         effects: vec![Effect::SanctionsCheck, Effect::ExternalRead],
         participants: vec![],
         approval: None,
         contracts: Contracts::default(),
-        body: vec![Statement::Step(screen), Statement::Step(threshold)],
+        body: vec![Statement::Step(screen)],
         gas_budget: GasBudget::default(),
     }
 }
@@ -271,12 +255,6 @@ impl OpHost for RuleHost {
                     )));
                 }
                 Ok(HostOutcome::Completed(json!(!sanctioned)))
-            }
-            "fiscal.threshold_check" => {
-                // Admit only when amount is below the threshold.
-                Ok(HostOutcome::Completed(json!(
-                    self.amount <= LOW_VALUE_THRESHOLD_MINOR_UNITS
-                )))
             }
             other => Err(HostError::UnknownPrimitive(other.to_string())),
         }

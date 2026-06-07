@@ -33,158 +33,154 @@ pub enum PrimitiveFamily {
 }
 
 /// A canonical primitive shape.
+///
+/// The corpus is **single-sourced against op-core**: a `PrimitiveShape` records
+/// only the stdlib-owned facets — the dotted `name` and its `family`. The
+/// default effect row and the deferred-subject flag are NOT stored here; they
+/// are derived on demand from op-core's authoritative canonical table
+/// ([`op_core::effects::canonical_effects_for`] /
+/// [`op_core::effects::canonical_is_deferred_subject`]) so the two crates cannot
+/// drift. `op_core` is the single source of truth for effects + the
+/// sanctions-domination exemption set; op-stdlib owns the name↔family map.
 #[derive(Debug, Clone)]
 pub struct PrimitiveShape {
     /// Dotted identifier.
     pub name: &'static str,
     /// Family.
     pub family: PrimitiveFamily,
-    /// Default effects.
-    pub default_effects: &'static [Effect],
-    /// Whether the primitive is deferred-subject (sanctions check is
-    /// permitted to run post-flight).
-    pub deferred_subject: bool,
 }
 
-/// The canonical corpus.
+impl PrimitiveShape {
+    /// The default effect row, derived from op-core's canonical table.
+    /// op-core is the single source of truth; this never invents a row.
+    pub fn default_effects(&self) -> Vec<Effect> {
+        op_core::effects::canonical_effects_for(self.name)
+    }
+
+    /// Whether the primitive is deferred-subject (sanctions check is permitted
+    /// to run post-flight), derived from op-core's single canonical predicate.
+    pub fn deferred_subject(&self) -> bool {
+        op_core::effects::canonical_is_deferred_subject(self.name)
+    }
+}
+
+/// The canonical corpus (name↔family map).
 ///
-/// Each row mirrors the reference vocabulary visible in the live kernel
-/// corpus and reflects the effect-inference table in the language spec.
+/// Each row mirrors the reference vocabulary visible in the live kernel corpus.
+/// Every name here MUST be a primitive op-core's canonical effect table
+/// recognizes; the effect row and deferred-subject flag for each are derived
+/// from op-core (see [`PrimitiveShape`]). The `stdlib_*` parity tests in `lib.rs`
+/// bind this set to op-core in both directions.
 pub const CANONICAL_PRIMITIVES: &[PrimitiveShape] = &[
     // Entity
     PrimitiveShape {
         name: "create.entity",
         family: PrimitiveFamily::Entity,
-        default_effects: &[Effect::SovereignWrite],
-        deferred_subject: true,
     },
     PrimitiveShape {
         name: "update.entity_status",
         family: PrimitiveFamily::Entity,
-        default_effects: &[Effect::SovereignWrite],
-        deferred_subject: false,
     },
     // Ownership
     PrimitiveShape {
         name: "ownership.issue_shares",
         family: PrimitiveFamily::Ownership,
-        default_effects: &[Effect::SovereignWrite],
-        deferred_subject: false,
     },
     PrimitiveShape {
         name: "ownership.transfer",
         family: PrimitiveFamily::Ownership,
-        default_effects: &[Effect::SovereignWrite],
-        deferred_subject: false,
     },
     PrimitiveShape {
         name: "update.cap_table",
         family: PrimitiveFamily::Ownership,
-        default_effects: &[Effect::SovereignWrite],
-        deferred_subject: false,
     },
     PrimitiveShape {
         name: "membership.admit",
         family: PrimitiveFamily::Ownership,
-        default_effects: &[Effect::SovereignWrite],
-        deferred_subject: false,
     },
     // Fiscal
     PrimitiveShape {
         name: "create.treasury",
         family: PrimitiveFamily::Fiscal,
-        default_effects: &[Effect::SovereignWrite],
-        deferred_subject: false,
     },
     PrimitiveShape {
         name: "create.bank_account",
         family: PrimitiveFamily::Fiscal,
-        default_effects: &[Effect::SovereignWrite],
-        deferred_subject: false,
     },
     PrimitiveShape {
         name: "fiscal.open_account",
         family: PrimitiveFamily::Fiscal,
-        default_effects: &[Effect::SovereignWrite],
-        deferred_subject: false,
     },
     PrimitiveShape {
         name: "fiscal.transfer",
         family: PrimitiveFamily::Fiscal,
-        default_effects: &[Effect::FiscalTransfer, Effect::SovereignWrite],
-        deferred_subject: false,
     },
     // Identity
     PrimitiveShape {
         name: "identity.verify",
         family: PrimitiveFamily::Identity,
-        default_effects: &[Effect::ExternalRead, Effect::IdentityMutation],
-        deferred_subject: false,
     },
     // Consent / Governance
     PrimitiveShape {
         name: "consent.board_resolution",
         family: PrimitiveFamily::Consent,
-        default_effects: &[Effect::GovernanceRequest, Effect::SovereignWrite],
-        deferred_subject: false,
     },
     PrimitiveShape {
         name: "consent.member_resolution",
         family: PrimitiveFamily::Consent,
-        default_effects: &[Effect::GovernanceRequest, Effect::SovereignWrite],
-        deferred_subject: false,
     },
     PrimitiveShape {
         name: "consent.shareholder_vote",
         family: PrimitiveFamily::Consent,
-        default_effects: &[Effect::GovernanceRequest, Effect::SovereignWrite],
-        deferred_subject: false,
     },
     // Screening
     PrimitiveShape {
         name: "screening.sanctions",
         family: PrimitiveFamily::Screening,
-        default_effects: &[Effect::SanctionsCheck, Effect::ExternalRead],
-        deferred_subject: false,
+    },
+    // `sanctions.check` is the alias op-core pairs with `screening.sanctions`
+    // (same SanctionsCheck + ExternalRead row). It is part of the canonical
+    // corpus so the stdlib advertisement matches op-core's recognized set.
+    PrimitiveShape {
+        name: "sanctions.check",
+        family: PrimitiveFamily::Screening,
     },
     // Trade
     PrimitiveShape {
         name: "trade.invoice_create",
         family: PrimitiveFamily::Trade,
-        default_effects: &[Effect::FiscalTransfer, Effect::SovereignWrite],
-        deferred_subject: false,
     },
     PrimitiveShape {
         name: "trade.lc_issue",
         family: PrimitiveFamily::Trade,
-        default_effects: &[Effect::FiscalTransfer, Effect::SovereignWrite],
-        deferred_subject: false,
     },
     // Document
     PrimitiveShape {
         name: "document.board_minutes",
         family: PrimitiveFamily::Document,
-        default_effects: &[Effect::DocumentGeneration],
-        deferred_subject: false,
     },
     PrimitiveShape {
         name: "document.shareholder_minutes",
         family: PrimitiveFamily::Document,
-        default_effects: &[Effect::DocumentGeneration],
-        deferred_subject: false,
     },
     PrimitiveShape {
         name: "document.commercial_invoice",
         family: PrimitiveFamily::Document,
-        default_effects: &[Effect::DocumentGeneration],
-        deferred_subject: false,
     },
     // Filing
     PrimitiveShape {
         name: "filing.registry_amendment",
         family: PrimitiveFamily::Filing,
-        default_effects: &[Effect::SovereignWrite, Effect::ProofEmit],
-        deferred_subject: false,
+    },
+    // Attestation — ProofEmit only; successful append is tau-labelled, failed
+    // persistence fails closed (op-core effects.rs).
+    PrimitiveShape {
+        name: "attestation.append",
+        family: PrimitiveFamily::Governance,
+    },
+    PrimitiveShape {
+        name: "attestation.emit",
+        family: PrimitiveFamily::Governance,
     },
 ];
 
@@ -206,7 +202,7 @@ mod tests {
     fn lookup_known_primitive() {
         let p = lookup("create.entity").unwrap();
         assert_eq!(p.family, PrimitiveFamily::Entity);
-        assert!(p.deferred_subject);
+        assert!(p.deferred_subject());
     }
 
     #[test]
@@ -224,12 +220,12 @@ mod tests {
         for p in CANONICAL_PRIMITIVES {
             if p.family == PrimitiveFamily::Document {
                 assert!(p
-                    .default_effects
+                    .default_effects()
                     .iter()
                     .any(|e| *e == Effect::DocumentGeneration));
             } else {
                 assert!(
-                    !p.default_effects.is_empty(),
+                    !p.default_effects().is_empty(),
                     "primitive {} has no effects",
                     p.name
                 );
