@@ -365,14 +365,15 @@ discipline):
   `IncompleteLexDischarge` and `structural_discharge` rules.
   `progress` is preserved (the new rule is a check, not a reduction).
 - **Lean.** `formal/lean/Op/AST.lean` and `Typing.lean` mirror.
-- **Joint Lex/Op theorem.** `formal/coq/Joint/Discharge.v` proves
+- **Joint Lex/Op theorem (TARGET — `Discharge.v` does not yet exist).**
+  `formal/coq/Joint/Discharge.v` *will prove* (it is not yet written)
   `lex_discharge_soundness`: for any pack `P`, program `Q`, and rule
   `r ∈ P.rules_for(Q.j, Q.k)`, if Op's type checker accepts `Q` and
   `Q.requires ∋ Contract::LexRule(rule_hash = r.hash, ...)` and
   `structural_discharge(Q.body, P.lookup(r.hash).body)` succeeds, then
   every execution of `Q` against any entity state produces a Lex
-  certificate that admissibly discharges `r`. This is the proof of
-  the binding's soundness; without it, `Contract::LexRule` is just a
+  certificate that admissibly discharges `r`. This *would be* the proof of
+  the binding's soundness; until it exists, `Contract::LexRule` is just a
   data shape.
 
 The joint theorem is the fence-post. Until it is proved, the
