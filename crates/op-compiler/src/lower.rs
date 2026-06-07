@@ -10,6 +10,9 @@
 //! params:
 //!   required: [<name>, ...]
 //!   optional: [<name>, ...]
+//! outputs:                       # or `returns:` — the program's result fields
+//!   - <name>                     # sequence form: each field typed String
+//!   # or mapping form: <name>: <string|int|bool|entity_ref|money|...>
 //! steps:
 //!   - id: <step-id>
 //!     type: <primitive>
@@ -105,6 +108,54 @@ pub enum LoweringError {
         /// Type-check diagnostics.
         errors: Vec<String>,
     },
+
+    /// A step declared an `on_failure` policy the lowerer does not recognize.
+    /// Silently dropping it would default the step to `CancelOperation`, which
+    /// is a different (and possibly far weaker or stronger) failure semantics
+    /// than the author wrote — a silent fallback on a security/control field.
+    #[error(
+        "step '{step}' declares unknown on_failure '{value}' (expected one of: \
+         cancel, cancel_operation, rollback, skip, retry, continue)"
+    )]
+    UnknownFailureAction {
+        /// Step declaring the policy.
+        step: String,
+        /// The unrecognized value.
+        value: String,
+    },
+
+    /// A `timeout`/`wait_for` carried a duration the lowerer cannot parse.
+    /// A silent `0` here disables the wait entirely (the callback never blocks),
+    /// so a malformed duration must fail loud rather than mint a 0 timeout.
+    #[error("step '{step}' has invalid duration '{value}': {detail}")]
+    InvalidDuration {
+        /// Step declaring the duration.
+        step: String,
+        /// The raw duration string.
+        value: String,
+        /// Why it could not be parsed.
+        detail: String,
+    },
+
+    /// A `wait_for` was declared without a sibling `timeout`. A wait with no
+    /// timeout silently blocks forever; the daemon recognizes only an explicit
+    /// timeout, so the absence is a control-field gap that must fail loud.
+    #[error("step '{step}' declares 'wait_for: {event}' without a sibling 'timeout'")]
+    WaitWithoutTimeout {
+        /// Step declaring the wait.
+        step: String,
+        /// The awaited event.
+        event: String,
+    },
+
+    /// A compensation clause omitted its `type` (inverse primitive). Defaulting
+    /// to a no-op would silently turn a declared rollback into nothing — the
+    /// compensation would appear present but invert nothing.
+    #[error("compensation step inverting '{forward}' has no 'type' (inverse primitive)")]
+    MissingCompensationType {
+        /// The forward step this compensation inverts.
+        forward: String,
+    },
 }
 
 /// Lower a YAML document into an `OpProgram`.
@@ -119,6 +170,7 @@ pub fn lower_yaml(yaml: &str) -> Result<LoweringReport, LoweringError> {
     let description = take_string_opt(&doc, "description").unwrap_or_default();
 
     let inputs = lower_params(&doc, &mut warnings);
+    let outputs = lower_outputs(&doc, &mut warnings);
     let steps_yaml = doc
         .get("steps")
         .and_then(YamlValue::as_sequence)
@@ -158,7 +210,7 @@ pub fn lower_yaml(yaml: &str) -> Result<LoweringReport, LoweringError> {
         jurisdiction,
         metadata,
         inputs,
-        outputs: vec![],
+        outputs,
         effects: vec![],
         participants: vec![],
         approval: None,
@@ -221,6 +273,91 @@ fn lower_params(doc: &YamlValue, warnings: &mut Vec<String>) -> Vec<(String, OpT
     out
 }
 
+/// Lower a top-level `outputs:` (or `returns:`) section into typed program
+/// output fields.
+///
+/// Two surface forms are accepted, mirroring the legacy corpus:
+/// - a sequence of field names (`outputs: [entity_id, status]`), each typed
+///   `String` (the same default `params.required` uses);
+/// - a mapping of field name to a type hint
+///   (`outputs: { entity_id: entity_ref, count: int }`).
+///
+/// When the section is absent the program declares no outputs (`vec![]`) —
+/// the empty result is preserved as the genuine "this program returns nothing"
+/// semantics, not a silent default that masks a declared-but-unparsed section.
+fn lower_outputs(doc: &YamlValue, warnings: &mut Vec<String>) -> Vec<(String, OpType)> {
+    // Accept `outputs` first, then `returns` as an alias.
+    let (field, section) = match (doc.get("outputs"), doc.get("returns")) {
+        (Some(o), _) => ("outputs", o),
+        (None, Some(r)) => ("returns", r),
+        (None, None) => return Vec::new(),
+    };
+
+    let mut out: Vec<(String, OpType)> = Vec::new();
+    match section {
+        YamlValue::Sequence(items) => {
+            for item in items {
+                if let Some(name) = item.as_str() {
+                    out.push((name.to_string(), OpType::String));
+                } else {
+                    warnings.push(format!(
+                        "{field} item not a string: {item:?} — output field skipped"
+                    ));
+                }
+            }
+        }
+        YamlValue::Mapping(m) => {
+            for (k, v) in m {
+                let Some(name) = k.as_str() else {
+                    warnings.push(format!("{field} key not a string: {k:?} — field skipped"));
+                    continue;
+                };
+                let ty = match v.as_str() {
+                    Some(hint) => output_type_from_hint(hint).unwrap_or_else(|| {
+                        warnings.push(format!(
+                            "{field}.{name} has unknown type hint '{hint}' — typed as String"
+                        ));
+                        OpType::String
+                    }),
+                    None => {
+                        warnings.push(format!(
+                            "{field}.{name} type hint not a string: {v:?} — typed as String"
+                        ));
+                        OpType::String
+                    }
+                };
+                out.push((name.to_string(), ty));
+            }
+        }
+        other => {
+            warnings.push(format!(
+                "{field} section is neither a sequence nor a mapping: {other:?} — no outputs declared"
+            ));
+        }
+    }
+    out
+}
+
+/// Map a YAML output type-hint string to an `OpType`. Returns `None` for an
+/// unrecognized hint so the caller can warn and fall back to `String`.
+fn output_type_from_hint(hint: &str) -> Option<OpType> {
+    match hint.to_lowercase().as_str() {
+        "string" | "str" | "text" => Some(OpType::String),
+        "int" | "integer" | "i64" => Some(OpType::Int),
+        "bool" | "boolean" => Some(OpType::Bool),
+        "unit" => Some(OpType::Unit),
+        "date" => Some(OpType::Date),
+        "timestamp" => Some(OpType::Timestamp),
+        "duration" => Some(OpType::Duration),
+        "entity_ref" | "entityref" | "entity" => Some(OpType::EntityRef),
+        "jurisdiction_ref" | "jurisdictionref" | "jurisdiction" => Some(OpType::JurisdictionRef),
+        "money" | "money_amount" | "moneyamount" => Some(OpType::MoneyAmount),
+        "content_digest" | "contentdigest" | "digest" => Some(OpType::ContentDigest),
+        "callback_event" | "callbackevent" => Some(OpType::CallbackEvent),
+        _ => None,
+    }
+}
+
 fn lower_step(
     step: &YamlValue,
     compensation: &BTreeMap<String, CompensationClause>,
@@ -261,32 +398,94 @@ fn lower_step(
         })
         .unwrap_or_default();
 
-    let effects = compliance_domains_to_effects(step, warnings);
+    // Compliance domains contribute both their effect projection (sanctions →
+    // SanctionsCheck, screening domains → ExternalRead) and a preserved
+    // `Contract::Domains` requirement so no listed domain is silently dropped.
+    let (domain_effects, declared_domains) = compliance_domains(step, &id, warnings);
 
-    let wait = step
-        .get("wait_for")
-        .and_then(YamlValue::as_str)
-        .map(|event| WaitSpec {
-            event: event.to_string(),
-            timeout_secs: step
+    // Step signature effects are inferred from the primitive's canonical effect
+    // row (the authoritative source the effect-safety checker validates
+    // against) unioned with the compliance-domain effects. Hardcoding an empty
+    // effect row would falsely claim, e.g., that a `create.entity` step has no
+    // effect while it carries `SovereignWrite`.
+    let mut effects: Vec<Effect> = canonical_effects_for(&step_type);
+    if effects.is_empty() && !canonical_primitive_known(&step_type) {
+        warnings.push(format!(
+            "step '{id}' uses primitive '{step_type}' not in the canonical corpus — \
+             its effect row could not be inferred and its I/O signature is left unknown \
+             (Record[]); route it through a typed step or extend the corpus"
+        ));
+    }
+    for e in domain_effects {
+        if !effects.contains(&e) {
+            effects.push(e);
+        }
+    }
+
+    // `wait_for` requires a sibling `timeout`. A wait with no timeout blocks
+    // forever; a malformed timeout silently disabling the wait (0s) is a
+    // control-field defect. Both fail loud.
+    let wait = match step.get("wait_for").and_then(YamlValue::as_str) {
+        Some(event) => {
+            let timeout_value = step
                 .get("timeout")
                 .and_then(YamlValue::as_str)
-                .map(parse_duration_seconds)
-                .unwrap_or(0),
-        });
+                .ok_or_else(|| LoweringError::WaitWithoutTimeout {
+                    step: id.clone(),
+                    event: event.to_string(),
+                })?;
+            let timeout_secs = parse_duration_seconds(timeout_value).map_err(|detail| {
+                LoweringError::InvalidDuration {
+                    step: id.clone(),
+                    value: timeout_value.to_string(),
+                    detail,
+                }
+            })?;
+            Some(WaitSpec {
+                event: event.to_string(),
+                timeout_secs,
+            })
+        }
+        None => None,
+    };
 
-    let on_failure = step
-        .get("on_failure")
-        .and_then(YamlValue::as_str)
-        .and_then(parse_failure_action);
+    // An unknown `on_failure` must not silently collapse to the `None` default
+    // (CancelOperation) — that rewrites the author's failure policy. Reject it.
+    let on_failure = match step.get("on_failure") {
+        None => None,
+        Some(YamlValue::String(s)) => Some(parse_failure_action(s).ok_or_else(|| {
+            LoweringError::UnknownFailureAction {
+                step: id.clone(),
+                value: s.clone(),
+            }
+        })?),
+        Some(other) => {
+            return Err(LoweringError::ShapeError {
+                field: format!("steps[{id}].on_failure"),
+                detail: format!("expected a string, got {other:?}"),
+            })
+        }
+    };
 
     let condition_requires = step
         .get("condition")
         .and_then(YamlValue::as_str)
         .map(|c| Contract::Expr(OpExpr::String(c.to_string())));
 
+    // Preserve the declared compliance domains as a contract requirement so
+    // the lowered program still carries every domain the source listed, even
+    // those with no distinct Op effect.
+    let domain_requirement = if declared_domains.is_empty() {
+        None
+    } else {
+        Some(Contract::Domains(declared_domains))
+    };
+
     let contracts = Contracts {
-        requires: condition_requires.into_iter().collect(),
+        requires: condition_requires
+            .into_iter()
+            .chain(domain_requirement)
+            .collect(),
         ensures: vec![],
     };
 
@@ -298,6 +497,12 @@ fn lower_step(
         id,
         body,
         signature: StepSignature {
+            // The canonical corpus carries effect rows but not typed I/O
+            // shapes, so the structural I/O type is genuinely unknown here.
+            // We do not fabricate field structure; `Record[]` is the
+            // explicit "no fields recovered from the YAML surface" shape, and
+            // unknown primitives are warned above so the gap is surfaced
+            // rather than presented as a precise empty signature.
             input: OpType::Record(vec![]),
             output: OpType::Record(vec![]),
             effects,
@@ -309,20 +514,42 @@ fn lower_step(
     })
 }
 
-fn parse_duration_seconds(d: &str) -> u64 {
+/// Parse a duration like `30s`, `5m`, `2h`, `7d` into seconds.
+///
+/// Fails loud (returns `Err(detail)`) on an empty string, a non-numeric
+/// magnitude, an unknown unit suffix, or an overflowing multiplication. A
+/// silent fallback to `0` here would disable the wait it gates entirely, so a
+/// malformed duration is never coerced into a valid-looking zero.
+fn parse_duration_seconds(d: &str) -> Result<u64, String> {
     let trimmed = d.trim();
     if trimmed.is_empty() {
-        return 0;
+        return Err("duration is empty".to_string());
     }
-    let (num_part, unit) = trimmed.split_at(trimmed.len().saturating_sub(1));
-    let n: u64 = num_part.parse().unwrap_or(0);
-    match unit {
-        "s" => n,
-        "m" => n.saturating_mul(60),
-        "h" => n.saturating_mul(3_600),
-        "d" => n.saturating_mul(86_400),
-        _ => 0,
+    // Split the trailing unit character from the magnitude.
+    let unit = trimmed
+        .chars()
+        .last()
+        .ok_or_else(|| "duration has no unit suffix".to_string())?;
+    let num_part = &trimmed[..trimmed.len() - unit.len_utf8()];
+    if num_part.is_empty() {
+        return Err(format!("duration '{trimmed}' has no numeric magnitude"));
     }
+    let n: u64 = num_part
+        .parse()
+        .map_err(|_| format!("duration magnitude '{num_part}' is not a non-negative integer"))?;
+    let secs_per_unit: u64 = match unit {
+        's' => 1,
+        'm' => 60,
+        'h' => 3_600,
+        'd' => 86_400,
+        other => {
+            return Err(format!(
+                "unknown duration unit '{other}' (expected one of s, m, h, d)"
+            ))
+        }
+    };
+    n.checked_mul(secs_per_unit)
+        .ok_or_else(|| format!("duration '{trimmed}' overflows u64 seconds"))
 }
 
 fn parse_failure_action(s: &str) -> Option<FailureAction> {
@@ -336,25 +563,165 @@ fn parse_failure_action(s: &str) -> Option<FailureAction> {
     }
 }
 
-fn compliance_domains_to_effects(step: &YamlValue, warnings: &mut Vec<String>) -> Vec<Effect> {
+/// Lower a step's `compliance_domains` list.
+///
+/// Returns `(effects, domains)`:
+/// - `effects` is the effect-row projection of the domains. Only domains that
+///   correspond to a distinct Op effect contribute: `sanctions` →
+///   [`Effect::SanctionsCheck`]; `aml`/`kyc` → [`Effect::ExternalRead`] (both
+///   require an external screening read, but neither is the dominating
+///   sanctions gate — only `sanctions` is). Every other recognized domain
+///   (corporate, tax, securities, …) is a compliance *requirement*, not an
+///   Op effect, so it contributes no effect.
+/// - `domains` is the full, normalized (lowercased) list of every recognized
+///   domain, preserved so the caller can attach it as a `Contract::Domains`
+///   requirement. No domain is silently dropped: an effect-less domain still
+///   rides in this list, and an *unrecognized* domain string is surfaced as a
+///   warning naming the value (rather than vanishing).
+fn compliance_domains(
+    step: &YamlValue,
+    step_id: &str,
+    warnings: &mut Vec<String>,
+) -> (Vec<Effect>, Vec<String>) {
     let mut effects = Vec::new();
+    let mut domains = Vec::new();
     if let Some(doms) = step
         .get("compliance_domains")
         .and_then(YamlValue::as_sequence)
     {
         for d in doms {
-            if let Some(name) = d.as_str() {
-                match name.to_lowercase().as_str() {
-                    "sanctions" => effects.push(Effect::SanctionsCheck),
-                    "aml" | "kyc" => effects.push(Effect::ExternalRead),
-                    _ => {}
+            let Some(raw) = d.as_str() else {
+                warnings.push(format!(
+                    "step '{step_id}': compliance_domains item not a string: {d:?} — dropped"
+                ));
+                continue;
+            };
+            let name = raw.to_lowercase();
+            match name.as_str() {
+                "sanctions" => effects.push(Effect::SanctionsCheck),
+                "aml" | "kyc" => effects.push(Effect::ExternalRead),
+                _ if is_known_compliance_domain(&name) => {
+                    // Recognized domain with no distinct Op effect; preserved
+                    // below as a contract requirement.
                 }
-            } else {
-                warnings.push(format!("compliance_domains item not a string: {d:?}"));
+                _ => {
+                    // Unknown domain string — surfaced, not silently dropped.
+                    // It is still preserved in `domains` so the requirement
+                    // is not lost, but the operator is warned it is not a
+                    // recognized compliance domain.
+                    warnings.push(format!(
+                        "step '{step_id}': compliance_domains entry '{raw}' is not a recognized \
+                         compliance domain — preserved as a requirement but mapped to no effect"
+                    ));
+                }
             }
+            domains.push(name);
         }
     }
-    effects
+    (effects, domains)
+}
+
+/// The 23 canonical kernel compliance-domain names (lowercased). Used to
+/// distinguish a recognized-but-effect-less domain (preserved silently as a
+/// contract requirement) from an unrecognized string (warned).
+fn is_known_compliance_domain(name: &str) -> bool {
+    matches!(
+        name,
+        "aml"
+            | "kyc"
+            | "sanctions"
+            | "tax"
+            | "securities"
+            | "corporate"
+            | "custody"
+            | "data_privacy"
+            | "licensing"
+            | "banking"
+            | "payments"
+            | "clearing"
+            | "settlement"
+            | "digital_assets"
+            | "employment"
+            | "immigration"
+            | "ip"
+            | "consumer_protection"
+            | "arbitration"
+            | "trade"
+            | "insurance"
+            | "anti_bribery"
+            | "sharia"
+    )
+}
+
+/// Canonical primitive effect table for the compiler's signature inference.
+///
+/// This mirrors `op_core::effects::canonical_effects_for` — the authoritative
+/// row the effect-safety checker validates each step signature against. op-core
+/// keeps that table `pub(crate)`, so the compiler inlines the same shapes here
+/// to infer a step's signature effects at lowering time. The two tables MUST
+/// agree: a divergence would make the lowerer emit a signature effect the
+/// safety checker then rejects as `UnjustifiedStepEffect`. A round-trip test
+/// (`signature_effects_match_canonical_corpus`) pins them together.
+fn canonical_effects_for(name: &str) -> Vec<Effect> {
+    match name {
+        "create.entity" | "update.entity_status" => vec![Effect::SovereignWrite],
+        "ownership.issue_shares"
+        | "ownership.transfer"
+        | "update.cap_table"
+        | "membership.admit" => vec![Effect::SovereignWrite],
+        "create.treasury" | "create.bank_account" | "fiscal.open_account" => {
+            vec![Effect::SovereignWrite]
+        }
+        "fiscal.transfer" => vec![Effect::FiscalTransfer, Effect::SovereignWrite],
+        "identity.verify" => vec![Effect::ExternalRead, Effect::IdentityMutation],
+        "consent.board_resolution" | "consent.member_resolution" | "consent.shareholder_vote" => {
+            vec![Effect::GovernanceRequest, Effect::SovereignWrite]
+        }
+        "screening.sanctions" | "sanctions.check" => {
+            vec![Effect::SanctionsCheck, Effect::ExternalRead]
+        }
+        "trade.invoice_create" | "trade.lc_issue" => {
+            vec![Effect::FiscalTransfer, Effect::SovereignWrite]
+        }
+        "document.board_minutes"
+        | "document.shareholder_minutes"
+        | "document.commercial_invoice" => vec![Effect::DocumentGeneration],
+        "filing.registry_amendment" => vec![Effect::SovereignWrite, Effect::ProofEmit],
+        "attestation.append" | "attestation.emit" => vec![Effect::ProofEmit],
+        _ => Vec::new(),
+    }
+}
+
+/// Whether `name` is a primitive in the canonical corpus. Mirrors
+/// `op_core::effects::canonical_primitive_known`.
+fn canonical_primitive_known(name: &str) -> bool {
+    matches!(
+        name,
+        "create.entity"
+            | "update.entity_status"
+            | "ownership.issue_shares"
+            | "ownership.transfer"
+            | "update.cap_table"
+            | "membership.admit"
+            | "create.treasury"
+            | "create.bank_account"
+            | "fiscal.open_account"
+            | "fiscal.transfer"
+            | "identity.verify"
+            | "consent.board_resolution"
+            | "consent.member_resolution"
+            | "consent.shareholder_vote"
+            | "screening.sanctions"
+            | "sanctions.check"
+            | "trade.invoice_create"
+            | "trade.lc_issue"
+            | "document.board_minutes"
+            | "document.shareholder_minutes"
+            | "document.commercial_invoice"
+            | "filing.registry_amendment"
+            | "attestation.append"
+            | "attestation.emit"
+    )
 }
 
 fn yaml_value_to_expr(v: &YamlValue) -> OpExpr {
@@ -406,11 +773,18 @@ fn index_compensation(
         if out.contains_key(&forward) {
             return Err(LoweringError::DuplicateCompensationTarget(forward));
         }
-        let primitive_name = s
-            .get("type")
-            .and_then(YamlValue::as_str)
-            .unwrap_or("noop")
-            .to_string();
+        // A compensation clause MUST name its inverse primitive. Defaulting a
+        // missing/malformed `type` to "noop" would silently turn a declared
+        // rollback into a no-op — the compensation would appear attached to the
+        // forward step while inverting nothing. Fail loud instead.
+        let primitive_name = match s.get("type") {
+            Some(YamlValue::String(t)) if !t.is_empty() => t.clone(),
+            _ => {
+                return Err(LoweringError::MissingCompensationType {
+                    forward: forward.clone(),
+                })
+            }
+        };
         let args: Vec<(String, OpExpr)> = s
             .get("params")
             .and_then(YamlValue::as_mapping)
@@ -591,10 +965,22 @@ compensation:
 
     #[test]
     fn duration_parsing() {
-        assert_eq!(parse_duration_seconds("30s"), 30);
-        assert_eq!(parse_duration_seconds("5m"), 300);
-        assert_eq!(parse_duration_seconds("2h"), 7_200);
-        assert_eq!(parse_duration_seconds("7d"), 604_800);
+        assert_eq!(parse_duration_seconds("30s"), Ok(30));
+        assert_eq!(parse_duration_seconds("5m"), Ok(300));
+        assert_eq!(parse_duration_seconds("2h"), Ok(7_200));
+        assert_eq!(parse_duration_seconds("7d"), Ok(604_800));
+    }
+
+    #[test]
+    fn duration_parsing_fails_loud() {
+        // Unknown unit, non-numeric magnitude, empty, no magnitude, and
+        // overflow must all error rather than silently coerce to 0.
+        assert!(parse_duration_seconds("30x").is_err()); // unknown unit
+        assert!(parse_duration_seconds("foos").is_err()); // non-numeric magnitude
+        assert!(parse_duration_seconds("").is_err()); // empty
+        assert!(parse_duration_seconds("s").is_err()); // no magnitude
+        assert!(parse_duration_seconds("-5s").is_err()); // negative
+        assert!(parse_duration_seconds("99999999999999999999d").is_err()); // overflow
     }
 
     #[test]
@@ -605,5 +991,472 @@ compensation:
             _ => false,
         });
         assert!(has_effect);
+    }
+
+    // ---------------------------------------------------------------------
+    // Test helpers
+    // ---------------------------------------------------------------------
+
+    fn step_named<'a>(report: &'a LoweringReport, id: &str) -> &'a OpStep {
+        report
+            .program
+            .body
+            .iter()
+            .find_map(|s| match s {
+                Statement::Step(step) if step.id == id => Some(step),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("step '{id}' not found"))
+    }
+
+    // ---------------------------------------------------------------------
+    // Finding 5 — step signature effects inferred from the canonical corpus
+    // ---------------------------------------------------------------------
+
+    #[test]
+    fn step_signature_effects_inferred_from_primitive() {
+        // The `activate` step lists NO compliance_domains, yet
+        // `update.entity_status` is a SovereignWrite primitive. The inferred
+        // signature must carry SovereignWrite — not an empty row.
+        let report = lower_yaml(SIMPLE).unwrap();
+        let activate = step_named(&report, "activate");
+        assert!(
+            activate.signature.effects.contains(&Effect::SovereignWrite),
+            "expected SovereignWrite inferred for update.entity_status; got {:?}",
+            activate.signature.effects
+        );
+        // The `gate` step's screening primitive carries SanctionsCheck +
+        // ExternalRead canonically; the compliance_domains projection adds
+        // SanctionsCheck (already present, deduplicated).
+        let gate = step_named(&report, "gate");
+        assert!(gate.signature.effects.contains(&Effect::SanctionsCheck));
+        assert!(gate.signature.effects.contains(&Effect::ExternalRead));
+    }
+
+    #[test]
+    fn signature_effects_match_canonical_corpus() {
+        // The inlined canonical table MUST agree with op-core's authoritative
+        // row for every corpus primitive; otherwise the lowerer would emit a
+        // signature effect the effect-safety checker rejects. We assert by
+        // compiling a gated program per primitive and confirming op-core
+        // accepts the inferred signature (no UnjustifiedStepEffect).
+        for prim in [
+            "create.entity",
+            "update.entity_status",
+            "ownership.issue_shares",
+            "ownership.transfer",
+            "update.cap_table",
+            "membership.admit",
+            "create.treasury",
+            "create.bank_account",
+            "fiscal.open_account",
+            "fiscal.transfer",
+            "identity.verify",
+            "consent.board_resolution",
+            "consent.member_resolution",
+            "consent.shareholder_vote",
+            "trade.invoice_create",
+            "trade.lc_issue",
+            "document.board_minutes",
+            "document.shareholder_minutes",
+            "document.commercial_invoice",
+            "filing.registry_amendment",
+            "attestation.append",
+            "attestation.emit",
+        ] {
+            let yaml = format!(
+                r#"
+operation: corpus.probe
+jurisdiction: _default
+steps:
+  - id: gate
+    type: screening.sanctions
+    compliance_domains: [sanctions]
+  - id: act
+    type: {prim}
+    depends_on: [gate]
+"#
+            );
+            let report = lower_yaml(&yaml).unwrap_or_else(|e| panic!("{prim} must lower: {e}"));
+            let tc = op_core::typecheck_program(&report.program);
+            assert!(
+                !tc.errors
+                    .iter()
+                    .any(|e| e.contains("UnjustifiedStepEffect") || e.contains("does not justify")),
+                "inferred signature for {prim} diverged from canonical row: {:?}",
+                tc.errors
+            );
+            // The inferred effects must equal op-core's canonical row for the
+            // primitive (the act step lists no domains, so no projection).
+            let act = step_named(&report, "act");
+            let mut inferred = act.signature.effects.clone();
+            inferred.sort();
+            let mut expected = canonical_effects_for(prim);
+            expected.sort();
+            assert_eq!(inferred, expected, "effect-row mismatch for {prim}");
+        }
+    }
+
+    #[test]
+    fn unknown_primitive_signature_is_warned_not_silently_empty() {
+        // An unknown primitive cannot have its effects inferred. The lowerer
+        // must surface that (warning) rather than claim a precise empty
+        // signature for a primitive it does not understand.
+        let yaml = r#"
+operation: unknown.prim
+jurisdiction: _default
+steps:
+  - id: mystery
+    type: vendor.proprietary_thing
+"#;
+        let report = lower_yaml(yaml).unwrap();
+        let mystery = step_named(&report, "mystery");
+        assert!(
+            mystery.signature.effects.is_empty(),
+            "unknown primitive has no inferable effects"
+        );
+        assert!(
+            report
+                .warnings
+                .iter()
+                .any(|w| w.contains("vendor.proprietary_thing") && w.contains("not in the canonical corpus")),
+            "expected a warning naming the unknown primitive; got {:?}",
+            report.warnings
+        );
+    }
+
+    // ---------------------------------------------------------------------
+    // Finding 1 + 7 — compliance domains: no silent drop, all preserved
+    // ---------------------------------------------------------------------
+
+    #[test]
+    fn recognized_effectless_domain_is_preserved_not_dropped() {
+        // `corporate` is a recognized compliance domain with no distinct Op
+        // effect. It must be preserved as a Contract::Domains requirement, not
+        // silently discarded, and must NOT warn (it is recognized).
+        let yaml = r#"
+operation: domain.preserve
+jurisdiction: _default
+steps:
+  - id: gate
+    type: screening.sanctions
+    compliance_domains: [sanctions, corporate, tax]
+  - id: act
+    type: update.entity_status
+    depends_on: [gate]
+"#;
+        let report = lower_yaml(yaml).unwrap();
+        let gate = step_named(&report, "gate");
+        let domains: Vec<&str> = gate
+            .contracts
+            .requires
+            .iter()
+            .find_map(|c| match c {
+                Contract::Domains(d) => Some(d.iter().map(String::as_str).collect()),
+                _ => None,
+            })
+            .expect("compliance domains must be preserved as a Contract::Domains requirement");
+        assert!(domains.contains(&"sanctions"));
+        assert!(domains.contains(&"corporate"));
+        assert!(domains.contains(&"tax"));
+        // No warnings for recognized domains.
+        assert!(
+            report.warnings.is_empty(),
+            "recognized domains must not warn; got {:?}",
+            report.warnings
+        );
+    }
+
+    #[test]
+    fn unknown_domain_string_is_surfaced_as_warning() {
+        // An UNRECOGNIZED domain string must fail loud (warning naming it),
+        // never silently vanish — a dropped domain is a missing requirement.
+        let yaml = r#"
+operation: domain.unknown
+jurisdiction: _default
+steps:
+  - id: gate
+    type: screening.sanctions
+    compliance_domains: [sanctions, definitely_not_a_domain]
+"#;
+        let report = lower_yaml(yaml).unwrap();
+        assert!(
+            report
+                .warnings
+                .iter()
+                .any(|w| w.contains("definitely_not_a_domain") && w.contains("not a recognized")),
+            "expected a warning naming the unknown domain; got {:?}",
+            report.warnings
+        );
+        // Even the unknown domain is preserved as a requirement (not lost).
+        let gate = step_named(&report, "gate");
+        let preserved = gate.contracts.requires.iter().any(|c| match c {
+            Contract::Domains(d) => d.iter().any(|x| x == "definitely_not_a_domain"),
+            _ => false,
+        });
+        assert!(preserved, "unknown domain must still be preserved, not dropped");
+    }
+
+    // ---------------------------------------------------------------------
+    // Finding 2 — unknown on_failure fails loud
+    // ---------------------------------------------------------------------
+
+    #[test]
+    fn unknown_on_failure_is_rejected() {
+        let yaml = r#"
+operation: failure.unknown
+jurisdiction: _default
+steps:
+  - id: s1
+    type: document.board_minutes
+    on_failure: explode
+"#;
+        let err = lower_yaml(yaml).unwrap_err();
+        assert_eq!(
+            err,
+            LoweringError::UnknownFailureAction {
+                step: "s1".to_string(),
+                value: "explode".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn known_on_failure_still_parses() {
+        let yaml = r#"
+operation: failure.known
+jurisdiction: _default
+steps:
+  - id: s1
+    type: document.board_minutes
+    on_failure: skip
+"#;
+        let report = lower_yaml(yaml).unwrap();
+        assert_eq!(step_named(&report, "s1").on_failure, Some(FailureAction::Skip));
+    }
+
+    // ---------------------------------------------------------------------
+    // Finding 3 — malformed duration / wait without timeout fail loud
+    // ---------------------------------------------------------------------
+
+    #[test]
+    fn malformed_timeout_on_wait_is_rejected() {
+        let yaml = r#"
+operation: wait.badtimeout
+jurisdiction: _default
+steps:
+  - id: waiter
+    type: document.board_minutes
+    wait_for: consent.approved
+    timeout: 30x
+"#;
+        let err = lower_yaml(yaml).unwrap_err();
+        assert!(
+            matches!(err, LoweringError::InvalidDuration { ref step, ref value, .. } if step == "waiter" && value == "30x"),
+            "expected InvalidDuration; got {err:?}"
+        );
+    }
+
+    #[test]
+    fn wait_without_timeout_is_rejected() {
+        // A wait with no timeout silently blocks forever; the lowerer rejects
+        // it rather than mint a 0 (disabled) timeout.
+        let yaml = r#"
+operation: wait.notimeout
+jurisdiction: _default
+steps:
+  - id: waiter
+    type: document.board_minutes
+    wait_for: consent.approved
+"#;
+        let err = lower_yaml(yaml).unwrap_err();
+        assert_eq!(
+            err,
+            LoweringError::WaitWithoutTimeout {
+                step: "waiter".to_string(),
+                event: "consent.approved".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn well_formed_wait_lowers_with_real_timeout() {
+        let yaml = r#"
+operation: wait.ok
+jurisdiction: _default
+steps:
+  - id: waiter
+    type: document.board_minutes
+    wait_for: consent.approved
+    timeout: 5m
+"#;
+        let report = lower_yaml(yaml).unwrap();
+        let wait = step_named(&report, "waiter").wait.as_ref().unwrap();
+        assert_eq!(wait.event, "consent.approved");
+        assert_eq!(wait.timeout_secs, 300);
+    }
+
+    // ---------------------------------------------------------------------
+    // Finding 4 — missing compensation type fails loud
+    // ---------------------------------------------------------------------
+
+    #[test]
+    fn compensation_without_type_is_rejected() {
+        // A compensation clause with no `type` would previously become a
+        // silent noop. It must fail loud — a rollback that inverts nothing is
+        // a security defect.
+        let yaml = r#"
+operation: comp.notype
+jurisdiction: _default
+steps:
+  - id: act
+    type: update.entity_status
+compensation:
+  steps:
+    - id: undo
+      inverts: act
+      params:
+        entity_id: "x"
+"#;
+        let err = lower_yaml(yaml).unwrap_err();
+        assert_eq!(
+            err,
+            LoweringError::MissingCompensationType {
+                forward: "act".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn compensation_with_empty_type_is_rejected() {
+        let yaml = r#"
+operation: comp.emptytype
+jurisdiction: _default
+steps:
+  - id: act
+    type: update.entity_status
+compensation:
+  steps:
+    - id: undo
+      inverts: act
+      type: ""
+"#;
+        let err = lower_yaml(yaml).unwrap_err();
+        assert_eq!(
+            err,
+            LoweringError::MissingCompensationType {
+                forward: "act".to_string(),
+            }
+        );
+    }
+
+    // ---------------------------------------------------------------------
+    // Finding 6 — program output declaration is recovered
+    // ---------------------------------------------------------------------
+
+    #[test]
+    fn outputs_sequence_form_recovered() {
+        let yaml = r#"
+operation: out.seq
+jurisdiction: _default
+outputs: [entity_id, status]
+steps:
+  - id: act
+    type: update.entity_status
+"#;
+        let report = lower_yaml(yaml).unwrap();
+        assert_eq!(
+            report.program.outputs,
+            vec![
+                ("entity_id".to_string(), OpType::String),
+                ("status".to_string(), OpType::String),
+            ]
+        );
+    }
+
+    #[test]
+    fn outputs_mapping_form_with_type_hints_recovered() {
+        let yaml = r#"
+operation: out.map
+jurisdiction: _default
+outputs:
+  entity_id: entity_ref
+  share_count: int
+  active: bool
+steps:
+  - id: act
+    type: update.entity_status
+"#;
+        let report = lower_yaml(yaml).unwrap();
+        assert_eq!(
+            report.program.outputs,
+            vec![
+                ("entity_id".to_string(), OpType::EntityRef),
+                ("share_count".to_string(), OpType::Int),
+                ("active".to_string(), OpType::Bool),
+            ]
+        );
+    }
+
+    #[test]
+    fn returns_alias_recovered() {
+        let yaml = r#"
+operation: out.returns
+jurisdiction: _default
+returns: [result_id]
+steps:
+  - id: act
+    type: update.entity_status
+"#;
+        let report = lower_yaml(yaml).unwrap();
+        assert_eq!(
+            report.program.outputs,
+            vec![("result_id".to_string(), OpType::String)]
+        );
+    }
+
+    #[test]
+    fn no_outputs_section_means_empty_not_a_default() {
+        // Absent outputs is the genuine "returns nothing" — vec![], no warning.
+        let report = lower_yaml(SIMPLE).unwrap();
+        assert!(report.program.outputs.is_empty());
+    }
+
+    #[test]
+    fn unknown_output_type_hint_warns_and_falls_back_to_string() {
+        let yaml = r#"
+operation: out.badhint
+jurisdiction: _default
+outputs:
+  weird: quaternion
+steps:
+  - id: act
+    type: update.entity_status
+"#;
+        let report = lower_yaml(yaml).unwrap();
+        assert_eq!(
+            report.program.outputs,
+            vec![("weird".to_string(), OpType::String)]
+        );
+        assert!(report
+            .warnings
+            .iter()
+            .any(|w| w.contains("quaternion") && w.contains("unknown type hint")));
+    }
+
+    // ---------------------------------------------------------------------
+    // Integration — a lowered, gated program type-checks end-to-end with the
+    // inferred signatures (proves finding 5 + 1 produce op-core-valid output).
+    // ---------------------------------------------------------------------
+
+    #[test]
+    fn lowered_simple_program_typechecks_with_inferred_signatures() {
+        let report = lower_yaml(SIMPLE).unwrap();
+        let tc = op_core::typecheck_program(&report.program);
+        assert!(
+            tc.success,
+            "lowered SIMPLE must typecheck with inferred signatures; errors: {:?}",
+            tc.errors
+        );
     }
 }
