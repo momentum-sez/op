@@ -121,8 +121,8 @@ op/
 │   │   │   ├── types.rs      # Bidirectional type checker, linearity tracking
 │   │   │   ├── gas.rs        # Two-tier gas (structural + extensional)
 │   │   │   ├── parser.rs     # JSON wire-format parser (round-trip with AST serde)
-│   │   │   ├── evaluator.rs  # Deterministic evaluator, host-abstraction trait
-│   │   │   ├── host.rs       # Host primitive trait
+│   │   │   ├── host.rs       # Host primitive trait (host-abstraction; the
+│   │   │   │                 #   reference evaluator lives in op-lex-compiler/interp.rs)
 │   │   │   ├── error.rs      # OpError variants
 │   │   │   └── lib.rs        # Public re-exports
 │   │   └── tests/
@@ -162,8 +162,10 @@ op/
    compiler derives the reverse-topological rollback plan.
 5. **Linear resources** — `Linear<T>` single-use, `Locked<T>` two-eliminator (commit or
    release), `Affine` consumable. Linearity violations surface at type-check.
-6. **Two-tier gas** — structural gas bounded statically by program shape, extensional
-   gas metered against cardinality certificates at runtime.
+6. **Two-tier gas** — structural gas bounded statically by program shape; extensional
+   gas bounded by cardinality certificates. The `GasMeter` API (gas.rs) defines both
+   tiers, but runtime metering (threading a `GasMeter` through an evaluator) is NOT yet
+   wired — the bound is enforced statically at type-check, not charged during execution.
 7. **Deterministic lowering** — Op programs lower deterministically into a runtime
    execution plan. Legacy YAML can be imported through the same plan structure.
 
