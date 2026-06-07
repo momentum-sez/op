@@ -189,13 +189,17 @@ AST/statement cost table (`step_cost`, `run_cost`, branch costs) rather than
 the effect-specific 8/4 schedule used in older notes. Unifying the paper
 fuel model and executable table is an open alignment item.
 
-**Extensional gas** is metered at runtime. A program whose execution cost
-depends on cardinalities that cannot be statically bounded — list length,
-syscall volume, storage growth — attaches a cardinality certificate
-attesting that a specified query returns at most `n` elements at the
-declared attestation time. The bound is `per_element_gas · n`. The runtime
-deducts metered cost at each cardinality-sensitive primitive; exhaustion
-transitions the configuration to `GAS_EXHAUSTED(extensional)`.
+**Extensional gas** is bounded by cardinality certificates. A program whose
+execution cost depends on cardinalities that cannot be statically bounded —
+list length, syscall volume, storage growth — attaches a cardinality
+certificate attesting that a specified query returns at most `n` elements at
+the declared attestation time. The bound is `per_element_gas · n`.
+Implementation status: this bound is the design target. The in-tree
+prototype computes and type-checks the bound (and enforces the *structural*
+bound at compile time), but does NOT yet thread a `GasMeter` through a
+reduction evaluator to deduct extensional cost at runtime — runtime metering
+and the `GAS_EXHAUSTED(extensional)` transition are not wired in the
+prototype.
 
 **Compensation budget sub-allocation.** A fraction of the structural gas
 budget is reserved for compensation. A program that commits a compensable
@@ -302,8 +306,10 @@ PCAuth validation protocol.
 The Rust workspace has four crates:
 
 - `op-core` — language core: AST, current type checker, effect-row algebra
-  with the sanctions-dominance analyzer, two-tier gas model, deterministic
-  evaluator over the host-abstraction trait, JSON wire-format parser.
+  with the sanctions-dominance analyzer, two-tier gas model, the
+  host-abstraction trait, JSON wire-format parser. (op-core defines the host
+  trait; the reference evaluator that drives it lives in
+  `op-lex-compiler/src/interp.rs`, not op-core.)
 - `op-compiler` — YAML and source-language lowering to the Op AST, with
   FNV-1a content addressing.
 - `op-stdlib` — canonical primitive corpus for the five kernel primitive

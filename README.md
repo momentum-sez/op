@@ -130,9 +130,12 @@ load-bearing for every claim in the paper.
   system, effect system, contracts, compensation, multi-entity operations,
   jurisdiction resolution, gas, policy blocks, EBNF.
 - `crates/op-core/` — language core: AST, type checker, effect-safety
-  analyser, gas model, evaluator, host trait.
+  analyser, gas model, host-abstraction trait. (op-core defines the host
+  trait; the reference evaluator that drives it lives in
+  `op-lex-compiler/src/interp.rs`, not op-core.)
 - `crates/op-compiler/`, `crates/op-stdlib/`, `crates/op-lex-compiler/` —
-  YAML lowering, canonical primitive corpus, Lex→Op compilation function.
+  YAML lowering, canonical primitive corpus, Lex→Op compilation function,
+  reference evaluator.
 - `examples/incorporate.op`, `examples/letter-of-credit.op` — worked
   programs over the canonical primitive corpus.
 
