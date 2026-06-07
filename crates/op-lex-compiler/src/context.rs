@@ -158,6 +158,17 @@ impl Jurisdiction {
 }
 
 /// Compilation context carried through the case functions.
+///
+/// FOLLOW-ON (proposal §5 pack interface): `CompileCtx` carries NO active-pack
+/// handle. `docs/proposal-lex-rule-contract-and-pack-binding.md` §5 (and §6
+/// "Pack consumption protocol") specifies that the build-time host supplies a
+/// pack at compile time so the compiler can resolve
+/// `pack.rules_for(jurisdiction, operation_type)` and populate the program's
+/// `Contracts` with `Contract::LexRule` references (see the companion FOLLOW-ON
+/// at `lib.rs::build_program`). Adding that field is deferred with the rest of
+/// the pack-binding feature — it depends on the `lex-pack` crate and the
+/// `Contract::LexRule` AST variant, neither of which exists yet (proposal §12
+/// "Awaits"). The context today is prelude + jurisdiction + gas budget only.
 #[derive(Debug, Clone)]
 pub struct CompileCtx {
     /// Prelude binding.

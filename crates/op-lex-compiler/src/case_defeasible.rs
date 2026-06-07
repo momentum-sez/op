@@ -53,6 +53,30 @@ pub fn compile_defeasible(
     let compiled_base = compile_one(base, ctx)?;
     let mut acc = compiled_base;
 
+    // FOLLOW-ON (op-core variant match-arm LUB): when a defeasible rule has at
+    // least one exception, this lowering emits `match guard { true -> [[body]];
+    // false -> [[acc]] }`. The exception `body` and the recursed `acc` (the base
+    // or a lower-priority exception) are BOTH verdicts of the common `Verdict`
+    // type, but they are typically DIFFERENT constructors (e.g. `NonCompliant`
+    // exception over a `Compliant` base). `op-core::types::typecheck_program`
+    // narrows each encoded `{tag,value}` verdict literal to its single-
+    // constructor variant (`Variant([(tag, value_ty)])`, the F8 rule, correct
+    // for scrutinee exhaustiveness) and then requires both match arms to have
+    // STRUCTURALLY EQUAL `OpType` — it has no variant-arm least-upper-bound, so
+    // `match arm `false` has type Variant([("Compliant",Unit)]), expected
+    // Variant([("NonCompliant",...)])` is rejected. The compiler cannot repair
+    // this from `op-lex-compiler` alone: op-core has no prelude, no type
+    // aliases, no subtyping/widening, and rejects unknown primitive calls, so
+    // there is no faithful (non-lossy, single-encoding) op-expression that makes
+    // a bare verdict constant type as the full `Verdict` union here. The
+    // principled fix is in `op-core` (out of this crate's edit scope): make the
+    // `OpExpr::Match` result-type rule in BOTH `check_expr` and
+    // `static_expr_type` compute the least-upper-bound of variant arm types
+    // (constructor-set union) instead of demanding equality. Until that lands,
+    // the FLAT defeasible case (zero exceptions) compiles + runs correctly; a
+    // defeasible rule WITH heterogeneous-constructor verdict arms does not
+    // type-check. Tracked by the `golden_defeasible_tolling` golden, whose
+    // verdict expectations are correct and intentionally left unchanged.
     for exc in sorted.iter().rev() {
         let guard = compile_one(&exc.guard, ctx)?;
         let body = compile_one(&exc.body, ctx)?;

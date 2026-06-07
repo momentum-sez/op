@@ -312,6 +312,17 @@ fn build_program(body: OpExpr, ctx: &CompileCtx) -> OpProgram {
         effects: program_effects(&body),
         participants: vec![],
         approval: Option::<ApprovalMode>::None,
+        // FOLLOW-ON (proposal §3 / §5 pack-contract population): the emitted
+        // program ships with EMPTY contracts. `docs/proposal-lex-rule-contract-
+        // and-pack-binding.md` §3/§5 specifies that `build_program` should query
+        // the active pack (`pack.rules_for(jurisdiction, operation_type)`) and
+        // populate `Contracts { requires, ensures }` with `Contract::LexRule`
+        // entries. That feature is NOT implemented here (it depends on the
+        // `Contract::LexRule` AST variant, the `lex-pack` crate, and an active-
+        // pack handle on `CompileCtx` — see the companion FOLLOW-ON in
+        // `context.rs`). This is intentionally `Contracts::default()` until the
+        // pack-binding feature lands; the compiler does NOT claim to populate
+        // contracts. See proposal §12 "Status: Frontier proposal".
         contracts: Contracts::default(),
         body: vec![Statement::Return(body)],
         gas_budget: ctx.gas_budget.clone(),
@@ -347,8 +358,24 @@ pub(crate) fn infer_expr_type(expr: &OpExpr, ctx: &CompileCtx) -> OpType {
                 .iter()
                 .map(|(name, e)| (name.clone(), infer_expr_type(e, ctx)))
                 .collect();
+            // An encoded `{tag: "Ctor", value: V}` record denotes ONE variant
+            // case. This MUST mirror op-core's `static_expr_type` (see F8 in
+            // `op-core/src/types.rs`): a single-constructor `Variant([(tag,
+            // value_ty)])`, NOT the empty `Variant([])`. The empty form was the
+            // pre-F8 op-core behavior; leaving it here desynchronized this
+            // compiler-side inference from op-core, so `build_program` advertised
+            // `outputs: [(result, Variant([]))]` while op-core inferred the real
+            // single-constructor return type and rejected the program with
+            // "return type ... does not match declared output Variant([])".
+            // Mirroring op-core keeps the emitted program's declared output type
+            // equal to op-core's inferred return type by construction.
             if is_encoded_variant_record(fields) {
-                OpType::Variant(vec![])
+                let tag = encoded_variant_tag(fields).unwrap_or_default();
+                let value_ty = inferred
+                    .iter()
+                    .find_map(|(n, ty)| (n == "value").then(|| ty.clone()))
+                    .unwrap_or(OpType::Unit);
+                OpType::Variant(vec![(tag, value_ty)])
             } else {
                 OpType::Record(inferred)
             }
@@ -404,12 +431,30 @@ pub(crate) fn infer_expr_type(expr: &OpExpr, ctx: &CompileCtx) -> OpType {
         OpExpr::Match {
             arms, catch_all, ..
         } => {
-            // Conservative: return the type of the first arm's body, falling
-            // back to the catch-all. All arms + catch-all should share a
-            // type by admissibility of the source Lex match.
-            arms.first()
+            // The match result type is the JOIN of the arm types plus the
+            // catch-all. This MUST mirror op-core's `static_expr_type` Match
+            // rule (`join_match_arm_types` -> `join_variant_arm_types`) exactly,
+            // because `build_program` declares this inferred type as the
+            // program's `result` output and op-core then checks the body's
+            // synthesized return type against it by *byte equality*
+            // (`&actual == expected`).
+            //
+            // Defeasible lowering (`case_defeasible`) emits
+            // `match guard { true -> [[body]]; false -> [[acc]] }` where the two
+            // arms are different constructors of the same `Verdict` variant
+            // (e.g. `NonCompliant` over `Compliant`). op-core joins those into
+            // the constructor-set UNION (sorted by tag); the old "first arm
+            // only" inference returned just `Variant([NonCompliant])`, which no
+            // longer equals op-core's union and would be rejected as
+            // "return type ... does not match declared output ...". So when
+            // every arm (and the catch-all) is a variant, take the same
+            // tag-sorted union here.
+            let arm_types: Vec<OpType> = arms
+                .iter()
                 .map(|arm| infer_expr_type(&arm.body, ctx))
-                .unwrap_or_else(|| infer_expr_type(catch_all, ctx))
+                .chain(std::iter::once(infer_expr_type(catch_all, ctx)))
+                .collect();
+            join_inferred_arm_types(arm_types)
         }
         OpExpr::Await { event, .. } => OpType::Await {
             event: event.clone(),
@@ -423,6 +468,42 @@ pub(crate) fn infer_expr_type(expr: &OpExpr, ctx: &CompileCtx) -> OpType {
     }
 }
 
+/// Join inferred `match` arm types, mirroring op-core's `join_match_arm_types`.
+///
+/// When every arm type is a `Variant`, the result is the constructor-set
+/// **union** keyed by tag name (so the constructor list is sorted by tag,
+/// deterministic, and byte-identical to op-core's `join_variant_arm_types`
+/// in the well-typed case). Otherwise the conservative legacy behavior applies:
+/// return the first arm's type (op-core's structural-equality rule rejects the
+/// program if the non-variant arms actually disagree, so this inferred output
+/// only needs to be correct when the program type-checks — i.e. when the arms
+/// agree, the first arm's type IS the result type).
+///
+/// `infer_expr_type` is total (it never errors), so a payload conflict on a
+/// shared tag — which op-core rejects loudly — is resolved here by first-wins
+/// per tag; op-core's rejection means the resulting (otherwise-unused) declared
+/// output is never compared against an accepted body.
+fn join_inferred_arm_types(arm_types: Vec<OpType>) -> OpType {
+    if arm_types.is_empty() {
+        return OpType::Unit;
+    }
+    let all_variants = arm_types
+        .iter()
+        .all(|t| matches!(t, OpType::Variant(_)));
+    if !all_variants {
+        return arm_types.into_iter().next().unwrap_or(OpType::Unit);
+    }
+    let mut union: std::collections::BTreeMap<String, OpType> = std::collections::BTreeMap::new();
+    for ty in &arm_types {
+        if let OpType::Variant(constructors) = ty {
+            for (tag, payload_ty) in constructors {
+                union.entry(tag.clone()).or_insert_with(|| payload_ty.clone());
+            }
+        }
+    }
+    OpType::Variant(union.into_iter().collect())
+}
+
 fn is_encoded_variant_record(fields: &[(String, OpExpr)]) -> bool {
     matches!(
         fields,
@@ -431,6 +512,21 @@ fn is_encoded_variant_record(fields: &[(String, OpExpr)]) -> bool {
             (value_name, _)
         ] if tag_name == "tag" && value_name == "value"
     )
+}
+
+/// Extract the literal constructor tag from an encoded variant record
+/// `{tag: "Ctor", value: V}`. Mirrors `op-core`'s `encoded_variant_tag`
+/// (see F8) so this compiler's `infer_expr_type` derives the same
+/// single-constructor variant type op-core's `static_expr_type` does.
+fn encoded_variant_tag(fields: &[(String, OpExpr)]) -> Option<String> {
+    match fields {
+        [(tag_name, OpExpr::String(tag)), (value_name, _)]
+            if tag_name == "tag" && value_name == "value" =>
+        {
+            Some(tag.clone())
+        }
+        _ => None,
+    }
 }
 
 /// Infer the program-level effect row from the body. Conservative: emits

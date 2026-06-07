@@ -20,6 +20,19 @@
 //! responsibility of a full Op runtime. The point here is to prove the
 //! compiled program is self-consistent enough that a naive evaluator can
 //! reproduce the expected verdict.
+//!
+//! FOLLOW-ON (extensional gas metering): this evaluator does NOT thread an
+//! `op_core::gas::GasMeter`. It performs no runtime extensional gas accounting
+//! — `run_program` never calls `GasMeter::charge_extensional`, and the
+//! program's `gas_budget` is carried on the emitted `OpProgram` (and bounded
+//! STATICALLY at compile time by `op-core::types::typecheck_program`, which
+//! computes a structural bound and an extensional bound from the cardinality
+//! certificate) but is not consumed at evaluation time here. A production Op
+//! runtime meters per-element extensional cost against the budget during
+//! execution; this reference evaluator deliberately does not, and makes no
+//! claim to. Wiring a `GasMeter` through `eval_expr` (charging per reduction /
+//! per host call and failing closed on `extensional_limit` exhaustion) is the
+//! follow-on; until then, do not read this interpreter as a gas-metered runtime.
 
 use op_core::{BinOp, OpExpr, OpHost, OpProgram, Primitive, PrimitiveCall, Statement, UnOp};
 use serde_json::Value;
