@@ -19,7 +19,7 @@ use crate::effects::{canonical_effects_for, check_effect_safety, expr_effects};
 use crate::error::OpError;
 use crate::gas::{estimate_structural_gas, StructuralCostTable};
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 /// Type-checking context.
 #[derive(Debug, Clone, Default)]
@@ -711,7 +711,13 @@ fn check_expr(expr: &OpExpr, ctx: &mut TypeContext) -> Result<(), String> {
             check_expr(scrutinee, ctx)?;
             let scrutinee_ty = static_expr_type(scrutinee, ctx)?;
             validate_match_patterns(&scrutinee_ty, arms)?;
-            let mut result_ty: Option<OpType> = None;
+            // First validate each arm/catch-all body in its own binding scope,
+            // collecting the arm types (with their pattern labels for
+            // diagnostics). The result type is then the JOIN of all arm types:
+            // a variant-arm least-upper-bound when every arm is a variant (the
+            // defeasible-rule case — see `join_variant_arm_types`), and the
+            // legacy structural-equality rule otherwise.
+            let mut arm_types: Vec<(String, OpType)> = Vec::with_capacity(arms.len() + 1);
             for arm in arms {
                 let mut sub = ctx.clone();
                 if !arm.binding.is_empty() && arm.binding != "_" {
@@ -721,27 +727,14 @@ fn check_expr(expr: &OpExpr, ctx: &mut TypeContext) -> Result<(), String> {
                     );
                 }
                 check_expr(&arm.body, &mut sub)?;
-                let arm_ty = static_expr_type(&arm.body, &sub)?;
-                if let Some(expected) = &result_ty {
-                    if expected != &arm_ty {
-                        return Err(format!(
-                            "match arm `{}` has type {:?}, expected {:?}",
-                            arm.pattern, arm_ty, expected
-                        ));
-                    }
-                } else {
-                    result_ty = Some(arm_ty);
-                }
+                arm_types.push((arm.pattern.clone(), static_expr_type(&arm.body, &sub)?));
             }
             check_expr(catch_all, ctx)?;
-            let catch_ty = static_expr_type(catch_all, ctx)?;
-            if let Some(expected) = &result_ty {
-                if expected != &catch_ty {
-                    return Err(format!(
-                        "match catch-all has type {catch_ty:?}, expected {expected:?}"
-                    ));
-                }
-            }
+            arm_types.push(("<catch-all>".to_string(), static_expr_type(catch_all, ctx)?));
+            // Validate that the arm types have a well-formed join (variant union
+            // or structural agreement); discard the joined type here — the
+            // synthesized type is produced by `static_expr_type`'s mirror call.
+            join_match_arm_types(&arm_types)?;
             Ok(())
         }
         OpExpr::AssertSafety(_) => Ok(()),
@@ -1112,7 +1105,7 @@ fn static_expr_type(expr: &OpExpr, ctx: &TypeContext) -> Result<OpType, String> 
         } => {
             let scrutinee_ty = static_expr_type(scrutinee, ctx)?;
             validate_match_patterns(&scrutinee_ty, arms)?;
-            let mut result_ty: Option<OpType> = None;
+            let mut arm_types: Vec<(String, OpType)> = Vec::with_capacity(arms.len() + 1);
             for arm in arms {
                 let mut sub = ctx.clone();
                 if !arm.binding.is_empty() && arm.binding != "_" {
@@ -1121,29 +1114,14 @@ fn static_expr_type(expr: &OpExpr, ctx: &TypeContext) -> Result<OpType, String> 
                         match_binding_type(&scrutinee_ty, &arm.pattern)?,
                     );
                 }
-                let ty = static_expr_type(&arm.body, &sub)?;
-                if let Some(expected) = &result_ty {
-                    if expected != &ty {
-                        return Err(format!(
-                            "match arm `{}` has type {:?}, expected {:?}",
-                            arm.pattern, ty, expected
-                        ));
-                    }
-                } else {
-                    result_ty = Some(ty);
-                }
+                arm_types.push((arm.pattern.clone(), static_expr_type(&arm.body, &sub)?));
             }
-            let catch_ty = static_expr_type(catch_all, ctx)?;
-            if let Some(expected) = &result_ty {
-                if expected != &catch_ty {
-                    return Err(format!(
-                        "match catch-all has type {catch_ty:?}, expected {expected:?}"
-                    ));
-                }
-                Ok(expected.clone())
-            } else {
-                Ok(catch_ty)
-            }
+            arm_types.push(("<catch-all>".to_string(), static_expr_type(catch_all, ctx)?));
+            // The match result type is the JOIN (least-upper-bound) of all arm
+            // types: the variant-union when every arm is a variant, and the
+            // legacy structural-equality result otherwise. Mirrors the same
+            // call in `check_expr`.
+            join_match_arm_types(&arm_types)
         }
         OpExpr::AssertSafety(_) => Ok(OpType::Unit),
         OpExpr::ConsumeLinear(inner) => static_expr_type(inner, ctx),
@@ -1212,6 +1190,115 @@ fn encoded_variant_tag(fields: &[(String, OpExpr)]) -> Option<String> {
         }
         _ => None,
     }
+}
+
+/// Least-upper-bound (join) of `match` arm types in the variant subtyping
+/// lattice.
+///
+/// A `match` whose arms produce different *constructors* of the same variant
+/// datatype (the defeasible-rule lowering `match guard { true -> NonCompliant;
+/// false -> Compliant }`) is well-typed: the result is the **union** of all arm
+/// constructor sets. Each arm is a subtype of that union (widening a singleton
+/// `Variant([C])` to `Variant([C, D, ...])` over the same datatype is sound —
+/// every value of the arm type is a value of the union), so the union is the
+/// supremum of the arm types and a program declaring `outputs: Variant([C, D,
+/// ...])` (e.g. the full `Verdict` constructor set) accepts it.
+///
+/// Discipline (this is a JOIN, not a silent merge):
+///
+/// * All arm types must be `Variant(_)` to take the union path. If any arm is a
+///   non-variant type, the join falls back to structural equality — a `Bool`
+///   arm next to an `Int` arm is a genuine error, and a non-variant arm next to
+///   a variant arm is a genuine error, both surfaced as the existing
+///   "different types" diagnostic by the caller.
+/// * SOUNDNESS CONDITION (fail-loud): a constructor `tag` present in more than
+///   one arm MUST carry the **same** payload type in every occurrence. A tag
+///   reused with conflicting payloads (`C(Int)` vs `C(String)`) is a real
+///   `TypeError` — never silently coerced, never resolved by picking one side.
+/// * The union is keyed by a `BTreeMap`, so the resulting constructor list is
+///   sorted by tag name — deterministic, so the compiler's mirror inference
+///   (`op-lex-compiler::infer_expr_type`) and this checker agree byte-for-byte
+///   on the declared/inferred output type.
+///
+/// Returns `Ok(None)` when the arm types are NOT all variants (signalling the
+/// caller to apply the legacy structural-equality rule), `Ok(Some(join))` when
+/// the variant union is well-formed, and `Err` on a payload conflict.
+fn join_variant_arm_types(arm_types: &[OpType]) -> Result<Option<OpType>, String> {
+    if arm_types.is_empty() {
+        return Ok(None);
+    }
+    // Union only applies when every arm is a variant. Otherwise the caller's
+    // structural-equality rule handles it (including the genuine error of
+    // mixing a variant arm with a non-variant arm).
+    let all_variants = arm_types
+        .iter()
+        .all(|t| matches!(t, OpType::Variant(_)));
+    if !all_variants {
+        return Ok(None);
+    }
+
+    // Accumulate the constructor union. A tag seen twice must agree on payload.
+    let mut union: BTreeMap<String, OpType> = BTreeMap::new();
+    for ty in arm_types {
+        if let OpType::Variant(constructors) = ty {
+            for (tag, payload_ty) in constructors {
+                match union.get(tag) {
+                    Some(existing) if existing != payload_ty => {
+                        return Err(format!(
+                            "match arms assign conflicting payload types to constructor \
+                             `{tag}`: {existing:?} vs {payload_ty:?}"
+                        ));
+                    }
+                    Some(_) => {}
+                    None => {
+                        union.insert(tag.clone(), payload_ty.clone());
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(Some(OpType::Variant(union.into_iter().collect())))
+}
+
+/// Compute the result type of a `match` from its labeled arm types (each arm
+/// plus the catch-all, the catch-all labeled `<catch-all>`).
+///
+/// * If every arm is a variant, the result is the constructor-set union
+///   (`join_variant_arm_types`), failing loud on a payload conflict.
+/// * Otherwise the legacy rule applies: all arm types must be structurally
+///   equal, and the first divergent arm is reported with its pattern label
+///   (preserving the existing `match arm ... has type ...` / `match catch-all
+///   has type ...` diagnostics, so non-variant mismatches and variant/
+///   non-variant mixes are rejected exactly as before).
+///
+/// `arm_types` is never empty in practice (the catch-all is always pushed);
+/// an empty slice degenerates to `Unit`.
+fn join_match_arm_types(arm_types: &[(String, OpType)]) -> Result<OpType, String> {
+    let only_types: Vec<OpType> = arm_types.iter().map(|(_, t)| t.clone()).collect();
+    if let Some(joined) = join_variant_arm_types(&only_types)? {
+        return Ok(joined);
+    }
+    // Legacy structural-equality path (non-variant arms, or a variant mixed
+    // with a non-variant — both genuine errors when they disagree).
+    let mut expected: Option<OpType> = None;
+    for (label, ty) in arm_types {
+        match &expected {
+            Some(exp) if exp != ty => {
+                if label == "<catch-all>" {
+                    return Err(format!(
+                        "match catch-all has type {ty:?}, expected {exp:?}"
+                    ));
+                }
+                return Err(format!(
+                    "match arm `{label}` has type {ty:?}, expected {exp:?}"
+                ));
+            }
+            Some(_) => {}
+            None => expected = Some(ty.clone()),
+        }
+    }
+    Ok(expected.unwrap_or(OpType::Unit))
 }
 
 fn match_binding_type(scrutinee_ty: &OpType, pattern: &str) -> Result<OpType, String> {
@@ -2167,6 +2254,327 @@ mod tests {
         assert!(
             err.contains("missing constructor arm `Approved`"),
             "match on encoded variant must require its constructor, got: {err}"
+        );
+    }
+
+    // --- Variant match-arm JOIN (least-upper-bound) ---------------------------
+    //
+    // A defeasible Lex rule with exceptions lowers to a match whose arms are
+    // DIFFERENT constructors of the same `Verdict` datatype. The match result
+    // type must be the constructor-set UNION (the join in the variant subtyping
+    // lattice), not a structural-equality demand on the two arms. The union is
+    // a sound supertype of each arm (widening a singleton variant to a union
+    // over the same datatype is sound); a tag reused with conflicting payloads
+    // is a hard error (no silent coercion). WHY: without this, no defeasible
+    // rule with exceptions can ever compile (a core Lex->Op incompleteness).
+
+    /// An encoded `{tag, value}` verdict literal, mirroring the lowering's wire
+    /// shape, so these tests exercise the real `static_expr_type` path.
+    fn encoded_verdict(tag: &str, value: OpExpr) -> OpExpr {
+        OpExpr::Record(vec![
+            ("tag".to_string(), OpExpr::String(tag.to_string())),
+            ("value".to_string(), value),
+        ])
+    }
+
+    /// JOIN of two single-constructor variant arms is their constructor-set
+    /// union, sorted by tag (deterministic). This is the `NonCompliant` over
+    /// `Compliant` defeasible shape.
+    #[test]
+    fn variant_match_two_constructors_join_to_union() {
+        let ctx = TypeContext::new();
+        // match guard { true -> NonCompliant{reason}; false -> Compliant{} }
+        // catch-all is itself a NonCompliant (the fail-closed value), so the
+        // three arm types are {NonCompliant, Compliant, NonCompliant}.
+        let m = OpExpr::Match {
+            scrutinee: Box::new(OpExpr::Bool(true)),
+            arms: vec![
+                MatchArm {
+                    pattern: "true".to_string(),
+                    binding: "_".to_string(),
+                    body: encoded_verdict(
+                        "NonCompliant",
+                        OpExpr::Record(vec![(
+                            "reason".to_string(),
+                            OpExpr::String("x".to_string()),
+                        )]),
+                    ),
+                },
+                MatchArm {
+                    pattern: "false".to_string(),
+                    binding: "_".to_string(),
+                    body: encoded_verdict("Compliant", OpExpr::Unit),
+                },
+            ],
+            catch_all: Box::new(encoded_verdict(
+                "NonCompliant",
+                OpExpr::Record(vec![(
+                    "reason".to_string(),
+                    OpExpr::String("unmatched".to_string()),
+                )]),
+            )),
+        };
+        let ty = static_expr_type(&m, &ctx).expect("variant arms must join");
+        assert_eq!(
+            ty,
+            OpType::Variant(vec![
+                ("Compliant".to_string(), OpType::Unit),
+                (
+                    "NonCompliant".to_string(),
+                    OpType::Record(vec![("reason".to_string(), OpType::String)])
+                ),
+            ]),
+            "join must be the tag-sorted constructor union, got {ty:?}"
+        );
+        // The join is a supertype of each arm: a program declaring the full
+        // union as its output must accept this match body.
+        assert!(matches!(
+            check_expr(&m, &mut ctx.clone()),
+            Ok(())
+        ));
+    }
+
+    /// 3+ distinct constructors join to the full union. Built by nesting: the
+    /// outer `false` arm is itself a match over two further constructors. This
+    /// also exercises nested-match join propagation.
+    #[test]
+    fn variant_match_three_plus_constructors_and_nested() {
+        let ctx = TypeContext::new();
+        let inner = OpExpr::Match {
+            scrutinee: Box::new(OpExpr::Bool(true)),
+            arms: vec![
+                MatchArm {
+                    pattern: "true".to_string(),
+                    binding: "_".to_string(),
+                    body: encoded_verdict("Compliant", OpExpr::Unit),
+                },
+                MatchArm {
+                    pattern: "false".to_string(),
+                    binding: "_".to_string(),
+                    body: encoded_verdict("Pending", OpExpr::Unit),
+                },
+            ],
+            catch_all: Box::new(encoded_verdict("Compliant", OpExpr::Unit)),
+        };
+        // inner joins to {Compliant, Pending}
+        let inner_ty = static_expr_type(&inner, &ctx).unwrap();
+        assert_eq!(
+            inner_ty,
+            OpType::Variant(vec![
+                ("Compliant".to_string(), OpType::Unit),
+                ("Pending".to_string(), OpType::Unit),
+            ])
+        );
+        let outer = OpExpr::Match {
+            scrutinee: Box::new(OpExpr::Bool(true)),
+            arms: vec![
+                MatchArm {
+                    pattern: "true".to_string(),
+                    binding: "_".to_string(),
+                    body: encoded_verdict("SanctionsBlocked", OpExpr::Unit),
+                },
+                MatchArm {
+                    pattern: "false".to_string(),
+                    binding: "_".to_string(),
+                    body: inner,
+                },
+            ],
+            catch_all: Box::new(encoded_verdict("SanctionsBlocked", OpExpr::Unit)),
+        };
+        let ty = static_expr_type(&outer, &ctx).expect("nested variant arms must join");
+        assert_eq!(
+            ty,
+            OpType::Variant(vec![
+                ("Compliant".to_string(), OpType::Unit),
+                ("Pending".to_string(), OpType::Unit),
+                ("SanctionsBlocked".to_string(), OpType::Unit),
+            ]),
+            "nested match joins to the full 3-constructor union, got {ty:?}"
+        );
+    }
+
+    /// SOUNDNESS: a constructor tag reused across arms with CONFLICTING payload
+    /// types is a hard TypeError — never silently merged or coerced. WHY:
+    /// widening a singleton to a union is sound only when shared tags agree;
+    /// `C(Int)` and `C(String)` are not the same constructor.
+    #[test]
+    fn variant_match_conflicting_payload_same_tag_is_type_error() {
+        let ctx = TypeContext::new();
+        let m = OpExpr::Match {
+            scrutinee: Box::new(OpExpr::Bool(true)),
+            arms: vec![
+                MatchArm {
+                    pattern: "true".to_string(),
+                    binding: "_".to_string(),
+                    body: encoded_verdict("C", OpExpr::Int(1)),
+                },
+                MatchArm {
+                    pattern: "false".to_string(),
+                    binding: "_".to_string(),
+                    body: encoded_verdict("C", OpExpr::String("s".to_string())),
+                },
+            ],
+            catch_all: Box::new(encoded_verdict("C", OpExpr::Int(0))),
+        };
+        let err = static_expr_type(&m, &ctx).unwrap_err();
+        assert!(
+            err.contains("conflicting payload types to constructor `C`"),
+            "payload conflict on a shared tag must be a type error, got: {err}"
+        );
+        // It must also fail `check_expr` (the validation entry point), not just
+        // the synthesis path.
+        assert!(check_expr(&m, &mut ctx.clone()).is_err());
+    }
+
+    /// The join falls back to structural equality for NON-variant arms: a `Bool`
+    /// arm next to an `Int` arm is still rejected exactly as before (the union
+    /// rule only fires when every arm is a variant). WHY: the join must not
+    /// loosen type checking for ordinary scalar/record arms.
+    #[test]
+    fn non_variant_arms_still_require_structural_equality() {
+        let ctx = TypeContext::new();
+        let m = OpExpr::Match {
+            scrutinee: Box::new(OpExpr::Bool(true)),
+            arms: vec![
+                MatchArm {
+                    pattern: "true".to_string(),
+                    binding: "_".to_string(),
+                    body: OpExpr::Int(1),
+                },
+                MatchArm {
+                    pattern: "false".to_string(),
+                    binding: "_".to_string(),
+                    body: OpExpr::Bool(false),
+                },
+            ],
+            catch_all: Box::new(OpExpr::Int(0)),
+        };
+        let err = static_expr_type(&m, &ctx).unwrap_err();
+        assert!(
+            err.contains("match arm `false` has type Bool"),
+            "non-variant arm disagreement must still be rejected, got: {err}"
+        );
+    }
+
+    /// A variant arm mixed with a non-variant arm is a genuine error (the union
+    /// path requires ALL arms to be variants; a mix falls to structural
+    /// equality, which they fail). WHY: widening a non-variant into a variant
+    /// union is unsound and must be rejected.
+    #[test]
+    fn variant_mixed_with_non_variant_arm_is_rejected() {
+        let ctx = TypeContext::new();
+        let m = OpExpr::Match {
+            scrutinee: Box::new(OpExpr::Bool(true)),
+            arms: vec![
+                MatchArm {
+                    pattern: "true".to_string(),
+                    binding: "_".to_string(),
+                    body: encoded_verdict("Compliant", OpExpr::Unit),
+                },
+                MatchArm {
+                    pattern: "false".to_string(),
+                    binding: "_".to_string(),
+                    body: OpExpr::Int(7),
+                },
+            ],
+            catch_all: Box::new(encoded_verdict("Compliant", OpExpr::Unit)),
+        };
+        assert!(
+            static_expr_type(&m, &ctx).is_err(),
+            "a variant arm mixed with a non-variant arm must be rejected"
+        );
+    }
+
+    /// Direct unit coverage of the join helper: union, conflict, non-variant
+    /// fallback, and idempotent self-join.
+    #[test]
+    fn join_helper_unit_cases() {
+        // union of two singletons (input order reversed → still tag-sorted)
+        let joined = join_variant_arm_types(&[
+            OpType::Variant(vec![("B".to_string(), OpType::Unit)]),
+            OpType::Variant(vec![("A".to_string(), OpType::Int)]),
+        ])
+        .unwrap();
+        assert_eq!(
+            joined,
+            Some(OpType::Variant(vec![
+                ("A".to_string(), OpType::Int),
+                ("B".to_string(), OpType::Unit),
+            ])),
+            "union must be tag-sorted regardless of input order"
+        );
+        // conflict on shared tag
+        assert!(join_variant_arm_types(&[
+            OpType::Variant(vec![("A".to_string(), OpType::Int)]),
+            OpType::Variant(vec![("A".to_string(), OpType::Bool)]),
+        ])
+        .is_err());
+        // non-variant present → None (caller applies structural equality)
+        assert_eq!(
+            join_variant_arm_types(&[OpType::Int, OpType::Variant(vec![])]).unwrap(),
+            None
+        );
+        // self-join is idempotent (already-unioned type widens to itself)
+        let v = OpType::Variant(vec![
+            ("A".to_string(), OpType::Unit),
+            ("B".to_string(), OpType::Unit),
+        ]);
+        assert_eq!(
+            join_variant_arm_types(&[v.clone(), v.clone()]).unwrap(),
+            Some(v)
+        );
+    }
+
+    /// End-to-end: a program whose body is the defeasible match and whose
+    /// declared output is the full union type type-checks (the join is a
+    /// subtype of / equal to the declared union). WHY: this is the exact
+    /// `build_program` -> `typecheck_program` contract the compiler relies on.
+    #[test]
+    fn declared_union_output_accepts_defeasible_match_body() {
+        let body = OpExpr::Match {
+            scrutinee: Box::new(OpExpr::Bool(true)),
+            arms: vec![
+                MatchArm {
+                    pattern: "true".to_string(),
+                    binding: "_".to_string(),
+                    body: encoded_verdict(
+                        "NonCompliant",
+                        OpExpr::Record(vec![(
+                            "reason".to_string(),
+                            OpExpr::String("r".to_string()),
+                        )]),
+                    ),
+                },
+                MatchArm {
+                    pattern: "false".to_string(),
+                    binding: "_".to_string(),
+                    body: encoded_verdict("Compliant", OpExpr::Unit),
+                },
+            ],
+            catch_all: Box::new(encoded_verdict(
+                "NonCompliant",
+                OpExpr::Record(vec![(
+                    "reason".to_string(),
+                    OpExpr::String("unmatched".to_string()),
+                )]),
+            )),
+        };
+        let mut prog = trivial_program(vec![Statement::Return(body)]);
+        prog.outputs = vec![(
+            "result".to_string(),
+            OpType::Variant(vec![
+                ("Compliant".to_string(), OpType::Unit),
+                (
+                    "NonCompliant".to_string(),
+                    OpType::Record(vec![("reason".to_string(), OpType::String)]),
+                ),
+            ]),
+        )];
+        let res = typecheck_program(&prog);
+        assert!(
+            res.success,
+            "declared union output must accept the defeasible match body: {:?}",
+            res.errors
         );
     }
 
