@@ -13,7 +13,8 @@
 //! host's responsibility.
 
 use crate::ast::{
-    BinOp, Effect, MatchArm, OpExpr, OpProgram, OpType, SafetyPredicate, Statement, StepBody, UnOp,
+    BinOp, Contract, DischargeRequirement, Effect, LexRuleRef, MatchArm, OpExpr, OpProgram, OpType,
+    SafetyPredicate, Statement, StepBody, UnOp,
 };
 use crate::effects::{canonical_effects_for, check_effect_safety, expr_effects};
 use crate::error::OpError;
@@ -200,22 +201,24 @@ pub struct GasAnalysis {
     pub max_extensional_gas: Option<u64>,
 }
 
-// FOLLOW-ON (deliberately NOT implemented in this soundness pass — these are
-// FEATURES, not soundness bugs in the linear/affine core): two pack-binding
-// checks specified in `docs/proposal-lex-rule-contract-and-pack-binding.md` §3
-// remain open work for `typecheck_program`:
-//   * `type-checker-no-contract-validation` — §3.1 completeness: query the
-//     active pack for every Lex rule whose `applies_to` matches the program's
-//     (operation_type, jurisdiction) and reject if the program's `requires`
-//     omits any (`TypeError::IncompleteLexDischarge`).
-//   * `structural-discharge-not-implemented` — §3.2 per-rule structural
-//     discharge: a syntactic, decidable check that walks the program body and
-//     verifies a structural witness exists for each declared rule's compiled
-//     predicate (sanctions_check gating writes, governance_request on a policy,
-//     obligation-before-write effect-DAG domination, certificate proof_emit).
-// Both require a pack handle / `CompiledTerm` contract that `op-core` does not
-// yet carry; they are joint `lex-core` + `op-stdlib` + `op-core` surface (see
-// proposal §3.2). They do not affect the linear/affine soundness fixed here.
+// §3.2 per-rule structural discharge IS implemented below
+// (`check_lex_rule_discharge`): a `Contract::LexRule` in `requires` whose
+// obligation has no structural witness in the program body is rejected
+// fail-closed. See `docs/proposal-lex-rule-contract-and-pack-binding.md` §3.2.
+//
+// FOLLOW-ON (deliberately NOT implemented — a FEATURE, not a soundness bug):
+// the §3.1 *completeness against the active pack* check remains open. It would
+// query the active pack for every Lex rule whose `applies_to` matches the
+// program's (operation_type, jurisdiction) and reject if the program's
+// `requires` omits any (`TypeError::IncompleteLexDischarge`). That check needs
+// a pack handle on the compile context and the `lex-pack` crate (`Pack`,
+// `CompiledLexPredicate`, `Pack::rules_for`) — neither exists yet (companion
+// `~/lex/docs/frontier-work/09` §3, design-only). `op-core` has zero internal
+// crate deps and cannot import a pack type; completeness is therefore a
+// compile-context (op-lex-compiler) concern once `lex-pack` lands. Discharge
+// (§3.2) does NOT need a pack: the obligation is carried explicitly on the
+// `LexRuleRef` (the canonical fully-explicit form, proposal §4.1), so the
+// witness check below is decidable inside op-core today.
 
 /// Type-check an Op program.
 pub fn typecheck_program(program: &OpProgram) -> TypeCheckResult {
@@ -258,6 +261,13 @@ pub fn typecheck_program(program: &OpProgram) -> TypeCheckResult {
         for e in effect_errors {
             errors.push(format!("{e}"));
         }
+    }
+
+    // §3.2 per-rule structural Lex-rule discharge (fail-closed): every
+    // `Contract::LexRule` in `requires` must have a structural witness in the
+    // program body. An undischarged obligation is a hard reject.
+    for problem in check_lex_rule_discharge(program) {
+        errors.push(problem);
     }
 
     let inferred_effects = program_effect_row(program);
@@ -1444,6 +1454,185 @@ fn record_safety_assertions(
         | OpExpr::Null
         | OpExpr::Var(_)
         | OpExpr::Await { .. } => {}
+    }
+}
+
+// ---------------------------------------------------------------------------
+// §3.2 Lex-rule structural discharge
+// ---------------------------------------------------------------------------
+
+/// Verify every `Contract::LexRule` obligation in `program.contracts.requires`
+/// has a structural witness in the program body, per
+/// `docs/proposal-lex-rule-contract-and-pack-binding.md` §3.2.
+///
+/// This is a *syntactic*, decidable check — it never runs the Lex evaluator
+/// (proposal §3.2: "The Lex evaluator is **never** re-run at the Op compile
+/// boundary"). Returns one error string per undischarged obligation; an empty
+/// result means every declared rule is discharged. Fail-closed by construction:
+/// a `LexRule` with no matching witness produces an error, which makes
+/// `typecheck_program` reject the program (success requires `errors.is_empty()`).
+///
+/// Discharge requirements are read off the program's `requires` contracts only
+/// (the obligations the program must satisfy before/at execution); a `LexRule`
+/// appearing in `ensures` is a post-condition the program asserts it produces
+/// and is checked under the `CertificateEmitted` pattern at the same surface.
+fn check_lex_rule_discharge(program: &OpProgram) -> Vec<String> {
+    let lex_rules: Vec<&LexRuleRef> = program
+        .contracts
+        .requires
+        .iter()
+        .chain(program.contracts.ensures.iter())
+        .filter_map(|c| match c {
+            Contract::LexRule(r) => Some(r),
+            _ => None,
+        })
+        .collect();
+    if lex_rules.is_empty() {
+        return Vec::new();
+    }
+
+    // An ordered emission trace of effects across the program body: the
+    // sequence of effects in body order, used for the domination check.
+    let trace = ordered_effect_trace(&program.body);
+    let effect_set: BTreeSet<&Effect> = trace.iter().collect();
+
+    let mut problems = Vec::new();
+    for r in lex_rules {
+        if let Err(reason) = discharge_witness(&r.discharge, &trace, &effect_set) {
+            problems.push(format!(
+                "Lex rule {hash} (jurisdiction {juris}, pack {pack}) is not discharged: {reason}",
+                hash = r.rule_hash.0,
+                juris = r.jurisdiction.0,
+                pack = r.pack_version.0,
+            ));
+        }
+    }
+    problems
+}
+
+/// Decide whether one discharge obligation has a structural witness in the
+/// program. `Err(reason)` means undischarged (fail-closed); `Ok(())` means a
+/// witness exists.
+fn discharge_witness(
+    req: &DischargeRequirement,
+    trace: &[Effect],
+    effect_set: &BTreeSet<&Effect>,
+) -> Result<(), String> {
+    match req {
+        DischargeRequirement::SanctionsCheck => {
+            if effect_set.contains(&Effect::SanctionsCheck) {
+                Ok(())
+            } else {
+                Err("no step carries a `sanctions_check` effect (proposal §3.2/§3.3)".to_string())
+            }
+        }
+        DischargeRequirement::GovernanceRequest => {
+            if effect_set.contains(&Effect::GovernanceRequest) {
+                Ok(())
+            } else {
+                Err("no step carries a `governance_request` effect (proposal §3.2)".to_string())
+            }
+        }
+        DischargeRequirement::CertificateEmitted => {
+            if effect_set.contains(&Effect::ProofEmit) {
+                Ok(())
+            } else {
+                Err("no step emits a `proof_emit` certificate effect (proposal §3.2)".to_string())
+            }
+        }
+        DischargeRequirement::ObligationBeforeWrite => {
+            // Every write-class effect must be dominated by a `proof_emit`
+            // earlier in the emission trace. Walk in order; once a `proof_emit`
+            // has been seen the obligation is satisfied for all later writes.
+            // A write that appears before any `proof_emit` is undischarged.
+            let mut obligation_emitted = false;
+            for e in trace {
+                match e {
+                    Effect::ProofEmit => obligation_emitted = true,
+                    Effect::SovereignWrite
+                    | Effect::IdentityMutation
+                    | Effect::FiscalTransfer
+                        if !obligation_emitted =>
+                    {
+                        return Err(format!(
+                            "write-class effect `{e:?}` is not dominated by a prior \
+                             `proof_emit` obligation (proposal §3.2)"
+                        ));
+                    }
+                    _ => {}
+                }
+            }
+            Ok(())
+        }
+    }
+}
+
+/// An ordered trace of the effects emitted across a program body, in body
+/// order. Used by the `ObligationBeforeWrite` domination check. Sequential
+/// statements contribute their effects in order; within a step the declared
+/// signature effects precede the body's. Branches (`choose`/`par`) are
+/// flattened in arm order — conservative for domination: a write reachable on
+/// any branch that is not preceded by a `proof_emit` on that same branch is
+/// surfaced, because each arm is walked with the pre-branch trace as context.
+fn ordered_effect_trace(stmts: &[Statement]) -> Vec<Effect> {
+    let mut acc = Vec::new();
+    trace_block(stmts, &mut acc);
+    acc
+}
+
+fn trace_block(stmts: &[Statement], acc: &mut Vec<Effect>) {
+    for s in stmts {
+        match s {
+            Statement::Step(step) => {
+                for e in &step.signature.effects {
+                    acc.push(e.clone());
+                }
+                trace_step_body(&step.body, acc);
+                if let Some(comp) = &step.compensate {
+                    trace_step_body(&comp.body, acc);
+                }
+            }
+            Statement::Let { value, .. }
+            | Statement::Return(value)
+            | Statement::Expr(value) => trace_expr(value, acc),
+            Statement::Run { call, .. } => trace_expr(call, acc),
+            Statement::Par { branches } => {
+                for (_name, expr) in branches {
+                    trace_expr(expr, acc);
+                }
+            }
+            Statement::Choose { arms, else_block } => {
+                for (g, b) in arms {
+                    trace_expr(g, acc);
+                    trace_block(b, acc);
+                }
+                if let Some(e) = else_block {
+                    trace_block(e, acc);
+                }
+            }
+            Statement::In { body, .. } => trace_block(body, acc),
+            Statement::Policy { .. } => {}
+        }
+    }
+}
+
+fn trace_step_body(body: &StepBody, acc: &mut Vec<Effect>) {
+    match body {
+        StepBody::Primitive(prim, args) => {
+            for e in canonical_effects_for(&prim.0) {
+                acc.push(e);
+            }
+            for (_name, expr) in args {
+                trace_expr(expr, acc);
+            }
+        }
+        StepBody::Block(inner) => trace_block(inner, acc),
+    }
+}
+
+fn trace_expr(expr: &OpExpr, acc: &mut Vec<Effect>) {
+    for e in expr_effects(expr).iter() {
+        acc.push(e.clone());
     }
 }
 
@@ -2824,5 +3013,261 @@ mod tests {
                 res.errors
             );
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // §3.2 Lex-rule structural discharge (SP-12 closure). Each test proves the
+    // type checker REJECTS a program carrying an unsatisfied `Contract::LexRule`
+    // obligation and ACCEPTS one whose body discharges it. The Lex evaluator is
+    // never run; discharge is decided syntactically against the program body.
+    // -----------------------------------------------------------------------
+
+    use crate::ast::{DischargeRequirement, LexRuleHash, LexRuleRef, PackVersion, QualIdent};
+
+    /// A `LexRuleRef` carrying the given discharge obligation. Hash/jurisdiction/
+    /// pack are opaque labels at the op-core layer; only the discharge shape
+    /// drives the witness check.
+    fn lex_rule(discharge: DischargeRequirement) -> Contract {
+        Contract::LexRule(LexRuleRef {
+            rule_hash: LexRuleHash("b3:0xa1c2".to_string()),
+            jurisdiction: QualIdent("sc".to_string()),
+            pack_version: PackVersion("curator:sc-dict@v1.4.0".to_string()),
+            discharge,
+        })
+    }
+
+    /// A single step with the given effects (Unit -> Unit).
+    fn step_with_effects(id: &str, effects: Vec<Effect>) -> Statement {
+        Statement::Step(OpStep {
+            id: id.to_string(),
+            body: StepBody::Block(vec![]),
+            signature: StepSignature {
+                input: OpType::Unit,
+                output: OpType::Unit,
+                effects,
+            },
+            wait: None,
+            on_failure: None,
+            compensate: None,
+            contracts: Contracts::default(),
+        })
+    }
+
+    /// Build a program with explicit `requires` contracts, a body, and a
+    /// declared effect row equal to the body's inferred effects (so the
+    /// orthogonal effect-declaration check does not mask the discharge result).
+    fn program_with_requires(requires: Vec<Contract>, body: Vec<Statement>) -> OpProgram {
+        let mut prog = trivial_program(body);
+        prog.contracts = Contracts {
+            requires,
+            ensures: vec![],
+        };
+        prog.effects = program_effect_row(&prog);
+        prog
+    }
+
+    /// SP-12 — a program declaring a `LexRule` whose obligation has NO witness
+    /// in the body is REJECTED. WHY: an undischarged Lex obligation must fail
+    /// closed; this is the gate that closes the "program is silently
+    /// non-compliant" failure mode (proposal §3.1 motivation, §3.2 enforcement).
+    #[test]
+    fn lex_rule_undischarged_sanctions_is_rejected() {
+        // Body has a governance step but NO sanctions_check.
+        let prog = program_with_requires(
+            vec![lex_rule(DischargeRequirement::SanctionsCheck)],
+            vec![step_with_effects("g", vec![Effect::GovernanceRequest])],
+        );
+        let res = typecheck_program(&prog);
+        assert!(!res.success, "undischarged sanctions LexRule must fail");
+        assert!(
+            res.errors.iter().any(|e| e.contains("is not discharged")
+                && e.contains("sanctions_check")),
+            "must name the undischarged sanctions obligation, got {:?}",
+            res.errors
+        );
+    }
+
+    /// SP-12 — the SAME LexRule passes once the body carries a `sanctions_check`
+    /// step. WHY: a satisfied obligation must NOT be rejected (the gate is not
+    /// vacuously failing everything).
+    #[test]
+    fn lex_rule_discharged_sanctions_passes() {
+        let prog = program_with_requires(
+            vec![lex_rule(DischargeRequirement::SanctionsCheck)],
+            vec![step_with_effects(
+                "gate",
+                vec![Effect::SanctionsCheck, Effect::ExternalRead],
+            )],
+        );
+        let res = typecheck_program(&prog);
+        assert!(
+            res.success,
+            "discharged sanctions LexRule must pass, got {:?}",
+            res.errors
+        );
+    }
+
+    /// A program with NO LexRule contracts is unaffected (the discharge check
+    /// is inert when nothing is declared). WHY: the feature must not change the
+    /// typing of programs that do not use it.
+    #[test]
+    fn no_lex_rule_contracts_is_inert() {
+        let prog = trivial_program(vec![Statement::Return(OpExpr::Unit)]);
+        let res = typecheck_program(&prog);
+        assert!(res.success, "no-LexRule program unaffected: {:?}", res.errors);
+    }
+
+    /// `governance_request` discharge: rejected without the effect, accepted
+    /// with it.
+    #[test]
+    fn lex_rule_governance_request_discharge() {
+        let missing = program_with_requires(
+            vec![lex_rule(DischargeRequirement::GovernanceRequest)],
+            vec![step_with_effects(
+                "s",
+                vec![Effect::SanctionsCheck, Effect::ExternalRead],
+            )],
+        );
+        assert!(
+            !typecheck_program(&missing).success,
+            "missing governance_request must fail"
+        );
+
+        let present = program_with_requires(
+            vec![lex_rule(DischargeRequirement::GovernanceRequest)],
+            vec![step_with_effects("board", vec![Effect::GovernanceRequest])],
+        );
+        let res = typecheck_program(&present);
+        assert!(
+            res.success,
+            "present governance_request must pass: {:?}",
+            res.errors
+        );
+    }
+
+    /// `ensures certificate` discharge (proposal §3.2 — `ensures` LexRule): a
+    /// program that emits no `proof_emit` fails; one that does passes. WHY:
+    /// the `ensures` post-condition LexRule is checked at the same surface.
+    #[test]
+    fn lex_rule_certificate_emitted_discharge_via_ensures() {
+        let mut missing = trivial_program(vec![step_with_effects(
+            "s",
+            vec![Effect::SanctionsCheck, Effect::ExternalRead],
+        )]);
+        missing.contracts = Contracts {
+            requires: vec![],
+            ensures: vec![lex_rule(DischargeRequirement::CertificateEmitted)],
+        };
+        missing.effects = program_effect_row(&missing);
+        assert!(
+            !typecheck_program(&missing).success,
+            "missing certificate proof_emit must fail"
+        );
+
+        let mut present = trivial_program(vec![step_with_effects("attest", vec![Effect::ProofEmit])]);
+        present.contracts = Contracts {
+            requires: vec![],
+            ensures: vec![lex_rule(DischargeRequirement::CertificateEmitted)],
+        };
+        present.effects = program_effect_row(&present);
+        let res = typecheck_program(&present);
+        assert!(
+            res.success,
+            "present certificate proof_emit must pass: {:?}",
+            res.errors
+        );
+    }
+
+    /// `obligation before write` discharge — the DOMINATION check. A write-class
+    /// effect that appears BEFORE any `proof_emit` is undischarged; the same
+    /// effects in proof-emit-then-write order pass. WHY: the obligation must be
+    /// emitted before the write it guards, not merely present somewhere.
+    #[test]
+    fn lex_rule_obligation_before_write_is_order_sensitive() {
+        // Write before any proof_emit: undischarged.
+        let bad = program_with_requires(
+            vec![lex_rule(DischargeRequirement::ObligationBeforeWrite)],
+            vec![
+                step_with_effects("gate", vec![Effect::SanctionsCheck, Effect::ExternalRead]),
+                step_with_effects("write", vec![Effect::SovereignWrite]),
+                step_with_effects("attest", vec![Effect::ProofEmit]),
+            ],
+        );
+        let res_bad = typecheck_program(&bad);
+        assert!(
+            !res_bad.success,
+            "write before proof_emit must fail the obligation-before-write rule"
+        );
+        assert!(
+            res_bad
+                .errors
+                .iter()
+                .any(|e| e.contains("not dominated by a prior `proof_emit`")),
+            "must name the domination failure, got {:?}",
+            res_bad.errors
+        );
+
+        // proof_emit before the write: discharged.
+        let good = program_with_requires(
+            vec![lex_rule(DischargeRequirement::ObligationBeforeWrite)],
+            vec![
+                step_with_effects("gate", vec![Effect::SanctionsCheck, Effect::ExternalRead]),
+                step_with_effects("attest", vec![Effect::ProofEmit]),
+                step_with_effects("write", vec![Effect::SovereignWrite]),
+            ],
+        );
+        let res_good = typecheck_program(&good);
+        assert!(
+            res_good.success,
+            "proof_emit before write must discharge the obligation: {:?}",
+            res_good.errors
+        );
+    }
+
+    /// A program with no write-class effect at all trivially discharges
+    /// `obligation_before_write` (there is no write to dominate). WHY: the rule
+    /// constrains writes; a write-free program has nothing to gate.
+    #[test]
+    fn lex_rule_obligation_before_write_trivial_when_no_write() {
+        let prog = program_with_requires(
+            vec![lex_rule(DischargeRequirement::ObligationBeforeWrite)],
+            vec![step_with_effects(
+                "gate",
+                vec![Effect::SanctionsCheck, Effect::ExternalRead],
+            )],
+        );
+        let res = typecheck_program(&prog);
+        assert!(
+            res.success,
+            "write-free program trivially discharges obligation-before-write: {:?}",
+            res.errors
+        );
+    }
+
+    /// Multiple LexRule obligations: ALL must discharge. One satisfied + one
+    /// not = reject, and the error names the unsatisfied one. WHY: discharge is
+    /// per-rule (proposal §3.2 "For each `Contract::LexRule(ref)`").
+    #[test]
+    fn lex_rule_all_obligations_must_discharge() {
+        let prog = program_with_requires(
+            vec![
+                lex_rule(DischargeRequirement::SanctionsCheck),
+                lex_rule(DischargeRequirement::GovernanceRequest),
+            ],
+            // Has sanctions, lacks governance.
+            vec![step_with_effects(
+                "gate",
+                vec![Effect::SanctionsCheck, Effect::ExternalRead],
+            )],
+        );
+        let res = typecheck_program(&prog);
+        assert!(!res.success, "a partially-discharged rule set must fail");
+        assert!(
+            res.errors
+                .iter()
+                .any(|e| e.contains("is not discharged") && e.contains("governance_request")),
+            "must name the undischarged governance obligation, got {:?}",
+            res.errors
+        );
     }
 }

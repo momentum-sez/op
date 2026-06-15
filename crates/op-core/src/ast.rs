@@ -67,28 +67,127 @@ pub struct Contracts {
 
 /// A contract clause.
 ///
-// FOLLOW-ON: `Contract::LexRule(LexRuleRef)` from
-// `docs/proposal-lex-rule-contract-and-pack-binding.md` §2.1/§3 is NOT yet a
-// variant of this enum. Adding it is a joint op-core + op-stdlib + lex-core
-// surface change. Per proposal §2.1 the variant carries a `LexRuleRef`, and
-// NONE of the types it needs exist yet in this crate:
-//   * `LexRuleRef { rule_hash, jurisdiction, pack_version }` — the reference,
-//   * `LexRuleHash` — the rule's content hash as carried in the pack,
-//   * `PackVersion` — the pinned pack version (the deterministic-replay
-//     binding the §3.1 completeness check rejects a mismatch against),
-//   * `QualIdent` — the jurisdiction qualifier on the ref.
-// Implementing the variant also requires the §3.1 completeness check and §3.2
-// per-rule structural discharge in `typecheck_program`, plus a pack handle /
-// `CompiledTerm` (`CompiledLexPredicate`) contract op-core does not yet carry
-// — see the matching FOLLOW-ON block in `types.rs`. It is a feature, not a
-// soundness bug in the current contract surface, and is deliberately left
-// unimplemented in this pass.
+/// Per `docs/proposal-lex-rule-contract-and-pack-binding.md` §2.1, `LexRule`
+/// references a Lex rule and carries the structural-discharge obligation the
+/// program must satisfy. The type checker verifies, at compile time, that the
+/// program body contains a structural witness for every `LexRule` in
+/// `requires` (§3.2); an under-discharged program is rejected fail-closed. The
+/// Lex evaluator is NEVER re-run at the Op boundary.
+///
+/// SCOPE (honest partial — see proposal §3 and the FOLLOW-ON in `types.rs`):
+/// the §3.1 *completeness against the active pack* check (query the pack for
+/// every rule whose `applies_to` matches `(operation_type, jurisdiction)` and
+/// reject if `requires` omits one) is NOT implemented here. It needs a pack
+/// handle on `CompileCtx` and the `lex-pack` crate (`Pack`,
+/// `CompiledLexPredicate`, `Pack::rules_for`), neither of which exists yet
+/// (companion `~/lex/docs/frontier-work/09` §3 — design-only). What IS
+/// implemented and load-bearing is §3.2 per-rule structural discharge: the
+/// obligation is carried explicitly on the ref (the canonical fully-explicit
+/// form per proposal §4.1; `auto_lex`/pack population is sugar over it), so the
+/// checker is decidable inside op-core with no external pack and rejects an
+/// undischarged obligation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Contract {
     /// Shorthand: a set of compliance domains must be evaluated / satisfied.
     Domains(Vec<String>),
     /// A boolean expression (reduced against the post-typecheck environment).
     Expr(OpExpr),
+    /// References a Lex rule supplied by the active pack. The type checker
+    /// resolves the reference at program-compile time and verifies the
+    /// program's steps structurally discharge the obligation it carries
+    /// (`LexRuleRef.discharge`). The Lex evaluator is NEVER re-executed at the
+    /// Op boundary.
+    LexRule(LexRuleRef),
+}
+
+/// A typed reference to a Lex rule a program declares it discharges
+/// (proposal §2.1).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LexRuleRef {
+    /// Content hash of the rule, as carried in the pack. BLAKE3 content
+    /// addressing (`b3:<hex>`), matching the canonical Lex `Blake3Hash` form
+    /// (`lex-core/src/ast.rs::Blake3Hash`) and proposal §2.2's
+    /// `rule_hash:b3:0x...` surface.
+    pub rule_hash: LexRuleHash,
+    /// Declared jurisdiction. MUST match the program's `OpProgram.jurisdiction`
+    /// exactly, OR be a wildcard explicitly covered by the rule's `applies_to`
+    /// declaration (companion §2.1). Carried as a `QualIdent`.
+    pub jurisdiction: QualIdent,
+    /// Pinned pack version. The deterministic-replay binding (proposal §2.1 /
+    /// §6): a validation/execution host re-checks the program against the same
+    /// pack version. Op specifies only the reference shape; pack discovery,
+    /// signature verification, and pinning are host concerns.
+    pub pack_version: PackVersion,
+    /// The structural-discharge obligation this rule places on the program
+    /// body (proposal §3.2). When the `lex-pack` crate exists, the build-time
+    /// host derives this from the rule's `CompiledLexPredicate.body`
+    /// (`CompiledTerm`); until then it is carried explicitly on the ref (the
+    /// canonical fully-explicit form, proposal §4.1). The type checker rejects
+    /// the program if the body carries no witness for it.
+    pub discharge: DischargeRequirement,
+}
+
+/// The content hash of a Lex rule as carried in the pack (proposal §2.1).
+///
+/// Mirrors the canonical Lex `Blake3Hash` (a BLAKE3 digest) rather than
+/// inventing a second hash vocabulary: equality of `LexRuleHash` IS rule
+/// identity (companion §3.2 — "equality is by hash, not name"). The string is
+/// the BLAKE3 hex digest (optionally `b3:`-prefixed per the proposal surface);
+/// op-core treats it as an opaque content-address and never re-hashes it.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct LexRuleHash(pub String);
+
+/// A pinned pack version (proposal §2.1, companion §3.4 — `(curator_did,
+/// semver, content_digest)`). Carried as an opaque label at the op-core layer;
+/// the structural meaning lives in `lex-pack`. The host pins it; Op only
+/// records it so replay is exact.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct PackVersion(pub String);
+
+/// A qualified identifier — a jurisdiction code (`sc`, `hn-prospera`) or
+/// operation-kind qualifier. Op already names its programs by string
+/// `(operation_type, jurisdiction)`; this is the matching newtype for the
+/// jurisdiction qualifier on a `LexRuleRef` (proposal §2.1). A bare `*` is the
+/// wildcard form (companion §2.1).
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct QualIdent(pub String);
+
+impl QualIdent {
+    /// Whether this qualifier is the explicit wildcard `*` (companion §2.1 —
+    /// "all" is the explicit wildcard, not absence).
+    pub fn is_wildcard(&self) -> bool {
+        self.0 == "*"
+    }
+}
+
+/// The structural-discharge obligation a `LexRule` places on a program body
+/// (proposal §3.2). Each variant names a *syntactic witness* the type checker
+/// looks for; discharge is decided in time linear in the program — no SMT, no
+/// fixpoint, no re-execution of the Lex evaluator. This is the op-core-local
+/// realization of the §3.2 `CompiledTerm` predicate-shape grammar; the listed
+/// patterns are the proposal's four, and the grammar is extended only by joint
+/// PR (proposal §3.2, §10.3).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DischargeRequirement {
+    /// `requires sanctions_check on subject S` — discharged when the program
+    /// contains a step (or expression) carrying the `sanctions_check` effect.
+    /// This is also the §3.3 I-1 sanctions-terminal pattern: defense in depth
+    /// alongside Op's own effect-safety rule that every write-class effect is
+    /// dominated by a sanctions check.
+    SanctionsCheck,
+    /// `requires governance_request on policy P` — discharged when the program
+    /// contains a step carrying the `governance_request` effect.
+    GovernanceRequest,
+    /// `requires obligation O before write` — discharged when every reachable
+    /// write-class effect (`sovereign_write`, `identity_mutation`,
+    /// `fiscal_transfer`) is dominated in the program body by a step that
+    /// emits a `proof_emit` effect (the obligation). A program with a
+    /// write-class effect and no preceding `proof_emit` fails.
+    ObligationBeforeWrite,
+    /// `ensures certificate C` — discharged when the program emits a
+    /// `proof_emit` effect on some step before termination.
+    CertificateEmitted,
 }
 
 // ---------------------------------------------------------------------------

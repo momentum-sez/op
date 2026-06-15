@@ -62,7 +62,7 @@ pub use context::{CompileCtx, Jurisdiction, PreludeBinding, PreludeCallable, Pre
 pub use error::{AdmissibilityViolation, CompileError};
 
 use op_core::{
-    typecheck_program, ApprovalMode, BinOp, Contracts, Effect, MatchArm, OpExpr, OpProgram, OpType,
+    typecheck_program, ApprovalMode, BinOp, Effect, MatchArm, OpExpr, OpProgram, OpType,
     ProgramMetadata, Statement, UnOp,
 };
 
@@ -312,18 +312,23 @@ fn build_program(body: OpExpr, ctx: &CompileCtx) -> OpProgram {
         effects: program_effects(&body),
         participants: vec![],
         approval: Option::<ApprovalMode>::None,
-        // FOLLOW-ON (proposal §3 / §5 pack-contract population): the emitted
-        // program ships with EMPTY contracts. `docs/proposal-lex-rule-contract-
-        // and-pack-binding.md` §3/§5 specifies that `build_program` should query
-        // the active pack (`pack.rules_for(jurisdiction, operation_type)`) and
-        // populate `Contracts { requires, ensures }` with `Contract::LexRule`
-        // entries. That feature is NOT implemented here (it depends on the
-        // `Contract::LexRule` AST variant, the `lex-pack` crate, and an active-
-        // pack handle on `CompileCtx` — see the companion FOLLOW-ON in
-        // `context.rs`). This is intentionally `Contracts::default()` until the
-        // pack-binding feature lands; the compiler does NOT claim to populate
-        // contracts. See proposal §12 "Status: Frontier proposal".
-        contracts: Contracts::default(),
+        // The emitted program carries the Lex-rule contracts the host declared
+        // on the context (`docs/proposal-lex-rule-contract-and-pack-binding.md`
+        // §2.1/§5, the fully-explicit form of §4.1). Empty by default — a
+        // program with no declared rules emits `Contracts::default()` exactly
+        // as before. The `Contract::LexRule` AST variant now exists in op-core,
+        // and `compile_lex` type-checks the emitted program, so each declared
+        // rule is structurally discharged (§3.2) at compile time; an
+        // under-discharged program fails with `EmittedOpTypecheckFailed`.
+        //
+        // FOLLOW-ON (proposal §3 / §5 *pack-driven* population): `build_program`
+        // does NOT yet query an active pack
+        // (`pack.rules_for(jurisdiction, operation_type)`) to *derive* these
+        // contracts; it emits what the host supplied in `ctx.lex_contracts`.
+        // Pack-driven derivation, and the §3.1 completeness check it feeds,
+        // depend on the `lex-pack` crate and an active-pack handle on
+        // `CompileCtx` (companion §3, design-only).
+        contracts: ctx.lex_contracts.clone(),
         body: vec![Statement::Return(body)],
         gas_budget: ctx.gas_budget.clone(),
     }
@@ -883,6 +888,59 @@ mod tests {
         };
         let err = compile_lex(&term, &ctx).unwrap_err();
         assert!(matches!(err, CompileError::TypeMismatch { .. }));
+    }
+
+    #[test]
+    fn build_program_emits_declared_lex_contracts_and_typechecks_when_discharged() {
+        // §2.1/§5 fully-explicit form: the host declares a `SanctionsCheck`
+        // LexRule; the sanctions-dominance body emits a `sanctions.check`
+        // (SanctionsCheck effect), so `compile_lex`'s internal type-check
+        // structurally discharges it (§3.2) and the program compiles.
+        use op_core::{Contract, Contracts, DischargeRequirement, LexRuleHash, LexRuleRef, PackVersion, QualIdent};
+        let rule = Contract::LexRule(LexRuleRef {
+            rule_hash: LexRuleHash("b3:0xa1c2".to_string()),
+            jurisdiction: QualIdent("sc".to_string()),
+            pack_version: PackVersion("curator:sc-dict@v1.4.0".to_string()),
+            discharge: DischargeRequirement::SanctionsCheck,
+        });
+        let ctx = CompileCtx::with_canonical_prelude("entity.incorporate")
+            .with_lex_contracts(Contracts {
+                requires: vec![rule.clone()],
+                ensures: vec![],
+            });
+        let term = LexTerm::sanctions_dominance_of(LexTerm::const_string("entity-0"));
+        let program = compile_lex(&term, &ctx).expect("discharged LexRule must compile");
+        // The emitted program actually carries the declared contract.
+        assert_eq!(program.contracts.requires, vec![rule]);
+        assert!(program.effects.contains(&Effect::SanctionsCheck));
+    }
+
+    #[test]
+    fn build_program_rejects_undischarged_lex_contract() {
+        // The host declares a `SanctionsCheck` LexRule but the body is a bare
+        // boolean constant (no effects, no sanctions_check). `compile_lex`'s
+        // internal type-check must reject the emitted program (fail-closed).
+        use op_core::{Contract, Contracts, DischargeRequirement, LexRuleHash, LexRuleRef, PackVersion, QualIdent};
+        let ctx = CompileCtx::with_canonical_prelude("trivial.const")
+            .with_lex_contracts(Contracts {
+                requires: vec![Contract::LexRule(LexRuleRef {
+                    rule_hash: LexRuleHash("b3:0x7f8e".to_string()),
+                    jurisdiction: QualIdent("sc".to_string()),
+                    pack_version: PackVersion("curator:sc-dict@v1.4.0".to_string()),
+                    discharge: DischargeRequirement::SanctionsCheck,
+                })],
+                ensures: vec![],
+            });
+        let result = compile_lex(&LexTerm::const_bool(true), &ctx);
+        match result {
+            Err(CompileError::EmittedOpTypecheckFailed { errors }) => {
+                assert!(
+                    errors.iter().any(|e| e.contains("is not discharged")),
+                    "undischarged LexRule must surface in the typecheck errors, got {errors:?}"
+                );
+            }
+            other => panic!("expected EmittedOpTypecheckFailed, got {other:?}"),
+        }
     }
 
     #[test]

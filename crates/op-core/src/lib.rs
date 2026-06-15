@@ -60,10 +60,11 @@ pub mod parser;
 pub mod types;
 
 pub use ast::{
-    ApprovalMode, BinOp, CardinalityCertificate, CompensationClause, Contract, Contracts, Effect,
-    ExprNode, FailureAction, GasBudget, GovernanceRequirement, MatchArm, OpExpr, OpProgram, OpStep,
-    OpType, Outcome, Participant, ParticipantRole, Primitive, ProgramMetadata, SafetyPredicate,
-    Statement, StepBody, StepSig, StepSignature, UnOp, WaitSpec,
+    ApprovalMode, BinOp, CardinalityCertificate, CompensationClause, Contract, Contracts,
+    DischargeRequirement, Effect, ExprNode, FailureAction, GasBudget, GovernanceRequirement,
+    LexRuleHash, LexRuleRef, MatchArm, OpExpr, OpProgram, OpStep, OpType, Outcome, PackVersion,
+    Participant, ParticipantRole, Primitive, ProgramMetadata, QualIdent, SafetyPredicate, Statement,
+    StepBody, StepSig, StepSignature, UnOp, WaitSpec,
 };
 pub use effects::{check_effect_safety, EffectRow, EffectSafetyError};
 pub use error::OpError;

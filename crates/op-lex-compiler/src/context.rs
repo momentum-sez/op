@@ -6,7 +6,7 @@
 //! whose name is not in the prelude triggers
 //! [`CompileError::UnboundVariable`](crate::error::CompileError::UnboundVariable).
 
-use op_core::{GasBudget, OpExpr, OpType};
+use op_core::{Contracts, GasBudget, OpExpr, OpType};
 use std::collections::BTreeMap;
 
 /// Information the prelude carries about a named callable.
@@ -159,16 +159,23 @@ impl Jurisdiction {
 
 /// Compilation context carried through the case functions.
 ///
-/// FOLLOW-ON (proposal §5 pack interface): `CompileCtx` carries NO active-pack
-/// handle. `docs/proposal-lex-rule-contract-and-pack-binding.md` §5 (and §6
-/// "Pack consumption protocol") specifies that the build-time host supplies a
-/// pack at compile time so the compiler can resolve
-/// `pack.rules_for(jurisdiction, operation_type)` and populate the program's
-/// `Contracts` with `Contract::LexRule` references (see the companion FOLLOW-ON
-/// at `lib.rs::build_program`). Adding that field is deferred with the rest of
-/// the pack-binding feature — it depends on the `lex-pack` crate and the
-/// `Contract::LexRule` AST variant, neither of which exists yet (proposal §12
-/// "Awaits"). The context today is prelude + jurisdiction + gas budget only.
+/// `lex_contracts` carries the program's declared Lex-rule contracts (proposal
+/// §2.1/§5) in the canonical fully-explicit form (proposal §4.1): the host
+/// supplies the `Contract::LexRule` declarations and `build_program` emits
+/// them, after which the op-core type checker structurally discharges each
+/// (§3.2). The `Contract::LexRule` AST variant now exists in op-core, so the
+/// fully-explicit path is real and exercised.
+///
+/// FOLLOW-ON (proposal §5 *pack-driven* population): `CompileCtx` still carries
+/// NO active-pack handle, so the compiler does not yet resolve
+/// `pack.rules_for(jurisdiction, operation_type)` to *derive* the contracts
+/// from a pack (it emits what the host explicitly supplies in `lex_contracts`).
+/// Pack-driven population — and the §3.1 completeness check it feeds — depends
+/// on the `lex-pack` crate (`Pack`, `CompiledLexPredicate`, `Pack::rules_for`),
+/// which does not exist yet (companion `~/lex/docs/frontier-work/09` §3,
+/// design-only). `auto_lex` is sugar over the explicit form (proposal §4.2);
+/// the canonical program is always fully explicit, which is what `lex_contracts`
+/// holds.
 #[derive(Debug, Clone)]
 pub struct CompileCtx {
     /// Prelude binding.
@@ -177,6 +184,10 @@ pub struct CompileCtx {
     pub jurisdiction: Jurisdiction,
     /// Gas budget to attach to the emitted program.
     pub gas_budget: GasBudget,
+    /// Explicitly-declared Lex-rule contracts to attach to the emitted program
+    /// (proposal §2.1/§4.1 fully-explicit form). Empty by default — a program
+    /// with no declared rules emits `Contracts::default()` exactly as before.
+    pub lex_contracts: Contracts,
     /// Program name for the emitted program.
     pub program_name: String,
     /// Branch-scoped binders: constructor payload bindings introduced by
@@ -198,9 +209,19 @@ impl CompileCtx {
             prelude: PreludeBinding::canonical(),
             jurisdiction: Jurisdiction::default_(),
             gas_budget: GasBudget::default(),
+            lex_contracts: Contracts::default(),
             program_name: program_name.to_string(),
             binders: BTreeMap::new(),
         }
+    }
+
+    /// Attach explicitly-declared Lex-rule contracts to be emitted on the
+    /// program (proposal §2.1/§4.1 fully-explicit form). The op-core type
+    /// checker structurally discharges each (§3.2) when the emitted program is
+    /// type-checked in `compile_lex`.
+    pub fn with_lex_contracts(mut self, contracts: Contracts) -> Self {
+        self.lex_contracts = contracts;
+        self
     }
 
     /// Extend the context with constructor-payload binders for a match arm.
