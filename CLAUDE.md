@@ -30,6 +30,10 @@ Read-only agents may inspect a shared checkout. Write-capable parallel agents mu
 
 External-facing documents must make sense to a cold reader. Remove private paths, private repository names, internal process labels, draft/version chatter, and unsupported claims. State the present mathematical or engineering object and its exact proof or verification status.
 
+## III-b. External-Document Voice And Rigor
+
+A document written *from* an entity is in that entity's first person (we/us/our); the reader is second person (you/your). Never narrate the sending entity or the addressed party in the third person, and never title or name a file as a third-person self-label ("[Sender]'s response") — heading and filename state the matter; proper names appear only in verbatim quotations and the signature. Hold an elite, measured register: no contractions, no colloquialism. Kill AI tells — firm-sounding fragment-buttons, the balanced see-saw, "X, not Y" antithesis, em-dash overuse, posturing filler, affected constructions, meta-signposting. Do not over-explain; be technically precise, complete, and rigorous: exact mechanics, every sub-question answered. In a point-by-point reply, reproduce the counterparty's verbatim question above each answer. Pre-ship, grep the rendered prose (excluding verbatim quotes and the signature) for third-person self-reference, banned qualifiers, and superseded concept-words as whole phrases, and re-measure counts against the artifact.
+
 ## IV. Voice
 
 Use terse, declarative technical prose. Prefer definitions, lemmas, commands, file references, and exact residual obligations. Avoid marketing language, filler, emojis, and evasive hedging where a precise statement is available.
