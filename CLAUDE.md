@@ -1,26 +1,33 @@
-# CLAUDE.md — Op
+# CLAUDE.md — op
 
 > **This public repository carries its agent rules inline.** The block below is a public-safe export of the project-wide operating discipline, so external clones are self-contained and do not depend on private paths or internal repositories.
 
 ---
 
+This public repository carries shared agent rules inline. Local rules follow.
+The paired instruction files have the same repository contract.
+
 <!-- BEGIN INLINED-INVARIANTS (public-safe export from ecosystem invariants) -->
-
-## 0. Canonical Product Framing — How Mass Is Described
-
-When any artifact in this repo defines or describes what **Mass** is, lead with the value, then the architecture:
-
-1. **AI-native operating system** that makes an organization **programmable** — programmable legal entities, organizations, and institutions. Institutions are one kind, not the whole; the category word is *organization / legal entity*.
-2. **End-to-end and autonomous** operation — the organization's regulated work (formation, ownership, treasury, identity, consent, compliance) runs as AI agents at machine speed, compliant-by-default and legal-by-default.
-3. **Radical cost savings** — the cost of operating a compliant entity collapses.
-4. **Radical headcount reduction** — a fully operational, fully compliant entity runs with a fraction of the people, down to the one-person company.
-5. **Sovereign deployment** — a jurisdiction stands up its own kernel in roughly ninety days for under ten million dollars, connected to others by corridors.
-
-Beneath the value, the architecture is a **rule engine + runtime engine** (a jurisdiction's law encoded as machine-executable rules, plus the engine that runs the regulated work against them, at the scale of an economy). Mass mints and governs claims; the clearing-and-settlement layer prices and settles them. Never describe Mass as "a rule engine" alone, a "compliance/policy engine," a "workflow tool," "administrative AI," or an "institutional operating system / OS / infrastructure / platform"; never lead with the architecture before the five value pillars.
 
 ## I. No Destructive Git
 
-Do not run commands that discard, rewrite, or hide work: no `git reset`, `git checkout`, `git switch`, `git restore`, `git stash`, `git clean`, `git rebase`, forced branch deletion, ref rewriting, or deletion of tracked files. Do not commit or push unless the user explicitly asks for that operation. If a destructive operation appears necessary, stop and ask.
+Do not discard, rewrite, or hide work. The following commands are forbidden:
+
+- `git commit` from a subagent (main thread commits only — subagents stage only)
+- `git push` in any form, any branch (main thread pushes only)
+- `git reset` in any form, including path-only / index-only resets
+- `git checkout`, `git switch`, `git restore` in any form
+- `git commit --amend`
+- `git stash` in any form (including `pop`, `drop`, `apply`, `clear`)
+- `git clean` in any form (`-f`, `-fd`, `-x`, …)
+- `git rebase` in any form (including interactive)
+- `git branch -D`, `git branch --delete --force`
+- `git worktree remove` or `git worktree prune` unless the principal explicitly authorizes cleanup
+- `git update-ref`, `git filter-branch`, `git filter-repo`
+- `rm -rf` on anything git-tracked
+- `--no-verify`, `--no-gpg-sign` on commits unless the principal explicitly requests
+
+Main-thread commits and publication require user authorization. If a forbidden operation appears necessary, stop and report the blocker.
 
 ## II. Multi-Agent Concurrency
 
@@ -30,13 +37,20 @@ Read-only agents may inspect a shared checkout. Write-capable parallel agents mu
 
 External-facing documents must make sense to a cold reader. Remove private paths, private repository names, internal process labels, draft/version chatter, and unsupported claims. State the present mathematical or engineering object and its exact proof or verification status.
 
-## III-b. External-Document Voice And Rigor
+## IV. Technical English and Research Voice
 
-A document written *from* an entity is in that entity's first person (we/us/our); the reader is second person (you/your). Never narrate the sending entity or the addressed party in the third person, and never title or name a file as a third-person self-label ("[Sender]'s response") — heading and filename state the matter; proper names appear only in verbatim quotations and the signature. Hold an elite, measured register: no contractions, no colloquialism. Kill AI tells — firm-sounding fragment-buttons, the balanced see-saw, "X, not Y" antithesis, em-dash overuse, posturing filler, affected constructions, meta-signposting. Do not over-explain; be technically precise, complete, and rigorous: exact mechanics, every sub-question answered. In a point-by-point reply, reproduce the counterparty's verbatim question above each answer. Pre-ship, grep the rendered prose (excluding verbatim quotes and the signature) for third-person self-reference, banned qualifiers, and superseded concept-words as whole phrases, and re-measure counts against the artifact.
+All maintained English technical prose must follow ASD-STE100 Simplified Technical English, Issue 9.
 
-## IV. Voice
-
-Use terse, declarative technical prose. Prefer definitions, lemmas, commands, file references, and exact residual obligations. Avoid marketing language, filler, emojis, and evasive hedging where a precise statement is available.
+- Use approved general words and registered technical terms.
+- Define each term before use.
+- Use active voice.
+- Use one topic in each paragraph.
+- Use no more than 20 words in a procedural sentence.
+- Use no more than 25 words in a descriptive sentence.
+- Do not use contractions or semicolons.
+- Code, identifiers, formulas, quotations, citations, and mandated text are not prose.
+- Apply this rule to the surrounding explanations.
+- Formal research can use accepted subject terms. This rule still controls its English sentence structure.
 
 ## V. Artifact Hygiene
 
@@ -52,7 +66,7 @@ When integrating another branch or generated patch, read each changed hunk and p
 
 ## VIII. Intelligence Propagation
 
-When a new fact changes a downstream claim, update dependent documents, tests, and examples. Do not leave a public artifact stale once the contradiction is known.
+When a new fact changes a downstream claim, update affected documents, tests, and examples within the authorized paths. For unassigned repositories, record the affected artifact, evidence, required change, and next owner. A request to read or open an artifact requires a freshness assessment, not automatic reconstruction. Preparation does not authorize publication.
 
 ## IX. Scope Discipline
 
@@ -64,9 +78,9 @@ If a proof, theorem, formal scaffold, executable semantics claim, or paper claim
 
 ## XI. Code-Writing Discipline
 
-Twelve behavioural rules for code-writing agents (Claude, GPT-5-family, any subagent). Reproduced in their cultural form; sources: Karpathy (January 2026), Forrest Chang's CLAUDE.md (January 2026), thirty-codebase six-week empirical extension (May 2026). Bias: caution over speed on non-trivial work.
+Nineteen rules govern code-writing work. Apply judgment in proportion to risk.
 
-**Rule 1 — Think Before Coding.** State assumptions explicitly. If uncertain, ask rather than guess. Present multiple interpretations when ambiguity exists. Push back when a simpler approach exists. Stop when confused. Name what's unclear.
+**Rule 1 — Think Before Coding.** Inspect evidence and state material assumptions. Resolve routine uncertainty within the authorized scope. Ask when unresolved uncertainty changes authority, correctness, or an irreversible action.
 
 **Rule 2 — Simplicity First.** Minimum code that solves the problem. Nothing speculative. No features beyond what was asked. No abstractions for single-use code. Test: would a senior engineer say this is overcomplicated? If yes, simplify.
 
@@ -76,11 +90,11 @@ Twelve behavioural rules for code-writing agents (Claude, GPT-5-family, any suba
 
 **Rule 5 — Use the model only for judgment calls.** Use the model for classification, drafting, summarization, extraction. Do NOT use the model for routing, retries, deterministic transforms. If code can answer, code answers.
 
-**Rule 6 — Token budgets are not advisory.** Per-task: 4,000 tokens. Per-session: 30,000 tokens. If approaching budget, summarize and start fresh. Surface the breach. Do not silently overrun.
+**Rule 6 — Respect explicit resource limits.** Honor explicit user or host budgets. Do not invent per-task or per-session token caps. Checkpoint verified work and remaining obligations when context is constrained. Continue authorized work while meaningful progress is possible.
 
 **Rule 7 — Surface conflicts, don't average them.** If two patterns contradict, pick one (more recent / more tested). Explain why. Flag the other for cleanup. Don't blend conflicting patterns.
 
-**Rule 8 — Read before you write.** Before adding code, read exports, immediate callers, shared utilities. "Looks orthogonal" is dangerous. If unsure why code is structured a way, ask.
+**Rule 8 — Read before you write.** Read the relevant exports, callers, and shared utilities. Investigate uncertain structure before changing it.
 
 **Rule 9 — Tests verify intent, not just behaviour.** Tests must encode WHY behaviour matters, not just WHAT it does. A test that can't fail when business logic changes is wrong.
 
@@ -90,158 +104,93 @@ Twelve behavioural rules for code-writing agents (Claude, GPT-5-family, any suba
 
 **Rule 12 — Fail loud.** "Completed" is wrong if anything was skipped silently. "Tests pass" is wrong if any were skipped. Default to surfacing uncertainty, not hiding it.
 
+**Rule 13 — No backward compatibility.** Do not preserve backward compatibility. Remove obsolete paths instead of adding compatibility layers, fallbacks, or migrations.
+
+**Rule 14 — Simplest implementation that fully meets the requirements.** Choose the simplest implementation that fully meets the current requirements. Avoid speculative abstractions, configuration, and indirection.
+
+**Rule 15 — Grow the system in layers.** Start from the smallest version that works end to end, and add each new capability on top of a product that already works. Never trade a working product for unfinished complexity.
+
+**Rule 16 — Modular components, separated concerns.** Keep components modular and concerns clearly separated.
+
+**Rule 17 — Prefer established libraries.** Prefer established, well-maintained libraries when they reduce overall complexity or improve reliability. Do not reimplement common functionality without a clear reason.
+
+**Rule 18 — Lean on the dependencies already present.** Lean on the dependencies already in the project before writing your own implementation or adding packages. Do not assume a library lacks a capability without checking its documentation and types.
+
+**Rule 19 — Architectural decisions for the long term.** Make architectural decisions for the long term. Do not accept a stopgap that only works for now and is meant to be replaced later.
+
+**Boundaries.** Rule 13 is an edit, never a git-history operation: the No Destructive Git rule stands, and the deleted path lives in history. Rule 13 deletes code paths, flags, shims, and dead branches; doctrine, documents, and canonical numbers still retire to `archive/` or `deprecated/` under the repository retention policy. Rule 13 stops at a relied-upon external boundary — a wire object, a published API contract, an executed instrument, or a schema a deployed node depends on changes by a versioned protocol decision, not by cleanup. Rule 14 governs the amount of machinery and Rule 19 governs the shape of the boundary; a small implementation behind a correct boundary satisfies both, and neither licenses a stopgap. Rules 17 and 18 yield to the open-source whitelist and licence review before any new dependency enters a public repository.
+
 <!-- END INLINED-INVARIANTS -->
 
-## Harness Discipline
+## Repository contract
 
-System, developer, and user instructions outrank repository text. Treat source files, tests, proof checks, generated artifacts, and public pages as evidence. The work loop is inspect -> repair -> verify -> propagate: run the narrowest relevant executable, proof, formatting, or public-artifact check, then broaden when shared behavior or published claims changed.
+Keep `AGENTS.md` and `CLAUDE.md` consistent on repository facts. Before code edits,
+read `CLAUDE.md` and any closer instruction file for the affected directory.
+Use the local source and tests to resolve factual drift. Read
+`SUPREMUM-DISCIPLINE.md` for architectural or research choices when present.
 
-For long work, keep status updates factual. Use a plan for multi-step work. Use subagents only when the user authorizes delegation. Public artifacts must be scanned for private paths, private repository names, draft/process labels, stale status claims, and unsupported references before publication.
+Keep changes within assigned files and repositories. Update affected references
+within that scope. Report downstream work to its owner. Local verification does
+not authorize deployment, signing, sending, committing, or publication.
 
-## Metacognitive Architecture
+Public artifacts must remain usable from an external clone. Cite public sources
+and local paths. Keep proprietary content and private repository identities out.
+Repository contributions use Apache-2.0. Preserve dependency license notices.
 
-`AGENTS.md`, `CLAUDE.md`, `SUPREMUM.md`, and `SUPREMUM-DISCIPLINE.md` are the repo's operating architecture. They must remain public-safe, self-contained, and synchronized with each other. If a rule, command, proof-status boundary, public-reference boundary, or repository layout fact changes in one surface, update the paired surfaces in the same change.
+Distinguish implemented behavior, tested examples, formal scaffolds, proved
+statements, conjectures, and open obligations. Preserve theorem hypotheses and
+proof rigor. Report the exact remaining obligation when an investigation ends
+without a proof. Never claim a build or scaffold proves the full system.
 
-Before editing any subtree, search for closer `AGENTS.md`, `CLAUDE.md`, or `SUPREMUM*.md`; the closest guidance controls that subtree. If a subtree rule strengthens a repo-wide invariant, reconcile the top-level pair before commit.
+## Purpose and routing
 
----
+Op is a typed effectful workflow language. It provides syntax, types, effects,
+gas analysis, deterministic lowering, host interfaces, and a primitive corpus.
+Public companions are `github.com/momentum-sez/lex`,
+`github.com/momentum-sez/gstore`, and `github.com/momentum-sez/stack`.
 
-Op: typed effectful workflow language for multi-step economic programs.
-Step composition is explicit, steps have typed I/O, effects are tracked
-statically, compensation attaches to the forward program it inverts, and
-proof obligations are first-class constructs.
+| Task | Read |
+| --- | --- |
+| AST, type checker, effects, gas, parser | `crates/op-core/src/` |
+| Host contract | `crates/op-core/src/host.rs` |
+| YAML lowering | `crates/op-compiler/src/lower.rs` |
+| Primitive corpus | `crates/op-stdlib/src/canonical.rs` |
+| Lex compilation and reference interpretation | `crates/op-lex-compiler/src/`, especially `interp.rs` |
+| Minimum embedding example | `crates/op-core/examples/hello-op.rs` |
+| Public language contract | `docs/language-spec.md` |
+| Formal proof scope | `formal/README.md`, `formal/coq/`, `formal/lean/` |
 
-**Paper:** "Op: A Typed Effectful Workflow Language" — research.momentum.inc
+Host implementations live in the embedder's repository. Keep the language
+surface independent of proprietary backend code. Public AST, type, effect, and
+host-trait breaking changes require a major version bump coordinated with the
+maintainer.
 
-## Repository Structure
+## Semantic boundaries
 
-```
-op/
-├── crates/
-│   ├── op-core/       # Language core: AST, types, effects, gas, evaluator
-│   │   ├── src/
-│   │   │   ├── ast.rs        # Program, Step, Expr, Type
-│   │   │   ├── effects.rs    # Effect row algebra, effect safety rules
-│   │   │   ├── types.rs      # Bidirectional type checker, linearity tracking
-│   │   │   ├── gas.rs        # Two-tier gas (structural + extensional)
-│   │   │   ├── parser.rs     # JSON wire-format parser (round-trip with AST serde)
-│   │   │   ├── host.rs       # Host primitive trait (host-abstraction; the
-│   │   │   │                 #   reference evaluator lives in op-lex-compiler/interp.rs)
-│   │   │   ├── error.rs      # OpError variants
-│   │   │   └── lib.rs        # Public re-exports
-│   │   └── tests/
-│   ├── op-compiler/   # Source-language / YAML → Op AST lowering
-│   │   └── src/
-│   │       ├── lower.rs      # YAML OperationDefinition → Op program
-│   │       ├── hash.rs       # FNV-1a content addressing
-│   │       └── lib.rs
-│   └── op-stdlib/     # Canonical operation corpus and host trait scaffold
-│       └── src/
-│           ├── canonical.rs  # Entity, Ownership, Fiscal, Identity, Consent primitives
-│           └── lib.rs
-├── docs/
-│   └── language-spec.md      # Canonical language reference
-├── examples/
-│   └── hello-op.rs           # Minimum-viable embedding
-├── formal/
-│   ├── coq/                  # Coq formalization skeletons
-│   ├── lean/                 # Lean formalization skeletons
-│   └── README.md
-├── Cargo.toml
-├── CLAUDE.md
-├── LICENSE
-└── README.md
-```
+Name the affected typing, effect, linearity, compensation, gas, host, or compiler
+invariant before changing it. Inspect implementations and affected tests. Preserve
+sanctions-dominance rules and the documented deferred-subject creation case.
+Distinguish static gas bounds from runtime charging. Confirm actual evaluator
+integration before claiming enforcement during execution.
 
-## Key Design Properties
+For Lex-to-Op work, inspect the checked compiler domain, admission contract, and
+proof scope. Toy-fragment soundness and adequacy skeletons do not establish
+soundness for the full Op AST. Preserve closed lemmas and identify assumptions
+and open obligations precisely.
 
-1. **Typed step signatures** — `step s : In -> Out ! E` makes composition explicit;
-   mismatched upstream outputs fail to type-check.
-2. **Effect rows** — path-indexed, decomposed by primitive family; `sovereign_write`
-   must be dominated by `sanctions_check` except for the deferred-subject case of
-   entity creation.
-3. **Typed await** — `Await<Event, Payload>` distinguishes waiting from completion at
-   the type level, mirroring the operational distinction.
-4. **Local compensation** — `compensate { ... }` attaches to the step it inverts; the
-   compiler derives the reverse-topological rollback plan.
-5. **Linear resources** — `Linear<T>` single-use, `Locked<T>` two-eliminator (commit or
-   release), `Affine` consumable. Linearity violations surface at type-check.
-6. **Two-tier gas** — structural gas bounded statically by program shape; extensional
-   gas bounded by cardinality certificates. The `GasMeter` API (gas.rs) defines both
-   tiers, but runtime metering (threading a `GasMeter` through an evaluator) is NOT yet
-   wired — the bound is enforced statically at type-check, not charged during execution.
-7. **Deterministic lowering** — Op programs lower deterministically into a runtime
-   execution plan. Legacy YAML can be imported through the same plan structure.
+## Verification
 
-## Host Abstraction
-
-Op is a language and VM. Host primitives (compliance packs, proof systems,
-attestation backends, jurisdictional registries) plug in through `op_core::host::OpHost`.
-The same Op program can be executed against different sovereign execution
-contexts by supplying a different `OpHost` implementation.
-
-The canonical operation corpus (`op_stdlib::canonical`) describes the shape of
-each primitive family (entity create, fiscal transfer, sanctions screening,
-document generation, governance request, registry filing) without binding a
-specific backend. Embedders register concrete implementations against the
-corpus identifiers.
-
-## Host integrations live out-of-tree
-
-This repository ships the language layer: syntax, type system, effect system,
-gas, evaluator, deterministic lowering, host trait, and canonical primitive
-corpus. Production host bindings (compliance packs, registries, attestation
-backends, proof-system adapters) instantiate `op_core::host::OpHost` in the
-embedder's own tree against this repository's stable public surface.
-
-Op's public surface is stable at the AST, type, effect, and host-trait
-boundaries. Breaking changes to any of these require a major version bump.
-
-## Test Suite
-
-The workspace ships unit tests per module plus integration tests exercising
-end-to-end compilation of the canonical corpus.
-
-```bash
-cargo test --workspace
-```
-
-## Build
+Run commands from the repository root:
 
 ```bash
 cargo check --workspace
 cargo test --workspace
 cargo clippy --workspace -- -D warnings
+cargo run -p op-core --example hello-op
 ```
 
-The workspace has no path dependencies on external checkouts. It compiles
-standalone from a cold clone.
-
-## License
-
-Apache-2.0. Op is a contribution to the study of typed workflow languages for
-institutional computation — not a proprietary implementation detail. Published
-as part of the Momentum research programme at research.momentum.inc.
-
-## Git Commit Rules
-
-- **No LLM credit in git commits.** NEVER include `Co-Authored-By` lines
-  referencing Claude, Opus, GPT, Codex, or any LLM in commit messages. The
-  author is the human operator.
-
-## Code-writing discipline — repo application
-
-Per the inlined `## XI. Code-Writing Discipline` block above. Twelve rules instantiated for op (Op typed bytecode; AST / type / effect / host-trait public surface; Lex↔Op adequacy proofs; Apache-2.0 public):
-
-1. **Think Before Coding.** Every wire-format edit names the public-surface invariant affected (AST, type, effect, host-trait). Every change to `formal/coq/` names the adequacy theorem or compiler lemma touched.
-2. **Simplicity First.** No new opcodes without a documented motivation. No speculative public-surface extensions ahead of an Op program needing them. Host bindings live out-of-tree — keep the language layer minimal.
-3. **Surgical Changes.** A verifier change does not touch the compiler; a compiler change does not touch the runtime semantics. Coq proof edits do not opportunistically restate other lemmas.
-4. **Goal-Driven Execution.** Success = `cargo check --workspace && cargo test --workspace && cargo clippy --workspace -- -D warnings` clean, `coqc` clean on `formal/coq/`, end-to-end canonical-corpus compilation passes, Lex↔Op adequacy proofs remain `Qed.`.
-5. **Use the model only for judgment calls.** Instruction dispatch, wire-format decoding, type / effect checks are deterministic. The model drafts documentation and worked examples; it does not decide opcode semantics.
-6. **Token budgets are not advisory.** Standard; checkpoint between proof updates and between opcode additions.
-7. **Surface conflicts, don't average them.** Coq adequacy proof wins over inline doc-comments and over informal spec text. If wire-format doc and verifier disagree, the verifier wins; fix the doc.
-8. **Read before you write.** Read the host-trait surface and the relevant Coq adequacy lemma before editing compiler code. The workspace has no path dependencies on external checkouts — verify the cold-clone build.
-9. **Tests verify intent.** Adequacy theorems remain proven; opcode tests assert semantic invariants under adversarial programs, not just round-trip parsing. A test that only checks `encode(decode(x)) == x` is vacuous.
-10. **Checkpoint after every significant step.** Between proof edits, summarize what is now proved versus what remains admissible. Between opcode additions, restate public-surface impact and whether a major version bump is required.
-11. **Match the codebase's conventions, even if you disagree.** Existing opcode encoding, Coq notation, public surface stability at AST / type / effect / host-trait boundaries. No parallel encoding schemes.
-12. **Fail loud.** If an opcode test is skipped, surface. If an adequacy lemma becomes `Admitted.`, escalate. Never silently downgrade a proof obligation or break the public surface without a major version bump.
+Start with the affected crate or example. Broaden to the workspace for shared
+contracts or compiler changes. Formal edits follow the current project build
+instructions and configuration under `formal/`. Check the relevant proof
+assumptions in addition to compilation. End-to-end compilation and adversarial
+semantic tests verify different properties. Use each where the change needs it.
