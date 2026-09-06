@@ -2,7 +2,7 @@
 
 > **This public repository carries its agent rules inline.** The blocks below are a public-safe export of the project-wide operating discipline, so external clones are self-contained and do not depend on private paths or internal repositories.
 >
-> **Mirrors the repo's `CLAUDE.md`** on substance. Before editing code in this repo, read `./CLAUDE.md` — it carries the repo-local layout, commands, doctrine, and conventions. `AGENTS.md` and `CLAUDE.md` must not diverge in facts; they may differ in structure and voice.
+> **Mirrors `CLAUDE.md` on substance.** Before code edits, read its local layout, commands, doctrine, conventions, and unique host rules. Skip unchanged shared inline blocks already read. Keep both roots aligned in facts and requirements; structure and voice may differ.
 >
 > **Model target.** Use the user-selected model and available host settings. Apply reasoning effort in proportion to task complexity. Use plain, direct language. No model or tool attribution in commits or persistent project artifacts.
 
