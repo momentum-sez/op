@@ -434,13 +434,13 @@ fn lower_step(
     // control-field defect. Both fail loud.
     let wait = match step.get("wait_for").and_then(YamlValue::as_str) {
         Some(event) => {
-            let timeout_value = step
-                .get("timeout")
-                .and_then(YamlValue::as_str)
-                .ok_or_else(|| LoweringError::WaitWithoutTimeout {
-                    step: id.clone(),
-                    event: event.to_string(),
-                })?;
+            let timeout_value =
+                step.get("timeout")
+                    .and_then(YamlValue::as_str)
+                    .ok_or_else(|| LoweringError::WaitWithoutTimeout {
+                        step: id.clone(),
+                        event: event.to_string(),
+                    })?;
             let timeout_secs = parse_duration_seconds(timeout_value).map_err(|detail| {
                 LoweringError::InvalidDuration {
                     step: id.clone(),
@@ -458,21 +458,22 @@ fn lower_step(
 
     // An unknown `on_failure` must not silently collapse to the `None` default
     // (CancelOperation) — that rewrites the author's failure policy. Reject it.
-    let on_failure = match step.get("on_failure") {
-        None => None,
-        Some(YamlValue::String(s)) => Some(parse_failure_action(s).ok_or_else(|| {
-            LoweringError::UnknownFailureAction {
-                step: id.clone(),
-                value: s.clone(),
+    let on_failure =
+        match step.get("on_failure") {
+            None => None,
+            Some(YamlValue::String(s)) => Some(parse_failure_action(s).ok_or_else(|| {
+                LoweringError::UnknownFailureAction {
+                    step: id.clone(),
+                    value: s.clone(),
+                }
+            })?),
+            Some(other) => {
+                return Err(LoweringError::ShapeError {
+                    field: format!("steps[{id}].on_failure"),
+                    detail: format!("expected a string, got {other:?}"),
+                })
             }
-        })?),
-        Some(other) => {
-            return Err(LoweringError::ShapeError {
-                field: format!("steps[{id}].on_failure"),
-                detail: format!("expected a string, got {other:?}"),
-            })
-        }
-    };
+        };
 
     let condition_requires = step
         .get("condition")
@@ -1126,7 +1127,8 @@ steps:
             report
                 .warnings
                 .iter()
-                .any(|w| w.contains("vendor.proprietary_thing") && w.contains("not in the canonical corpus")),
+                .any(|w| w.contains("vendor.proprietary_thing")
+                    && w.contains("not in the canonical corpus")),
             "expected a warning naming the unknown primitive; got {:?}",
             report.warnings
         );
@@ -1201,7 +1203,10 @@ steps:
             Contract::Domains(d) => d.iter().any(|x| x == "definitely_not_a_domain"),
             _ => false,
         });
-        assert!(preserved, "unknown domain must still be preserved, not dropped");
+        assert!(
+            preserved,
+            "unknown domain must still be preserved, not dropped"
+        );
     }
 
     // ---------------------------------------------------------------------
@@ -1239,7 +1244,10 @@ steps:
     on_failure: skip
 "#;
         let report = lower_yaml(yaml).unwrap();
-        assert_eq!(step_named(&report, "s1").on_failure, Some(FailureAction::Skip));
+        assert_eq!(
+            step_named(&report, "s1").on_failure,
+            Some(FailureAction::Skip)
+        );
     }
 
     // ---------------------------------------------------------------------

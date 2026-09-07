@@ -107,11 +107,8 @@ fn flat_rule_with_empty_exceptions_has_no_nested_match() {
     let ctx = CompileCtx::with_canonical_prelude("seychelles.fsmr");
     let program = compile_lex(&term, &ctx).unwrap();
 
-    match &program.body[0] {
-        Statement::Return(OpExpr::Match { .. }) => {
-            panic!("flat rule must not introduce a nested Match");
-        }
-        _ => {}
+    if let Statement::Return(OpExpr::Match { .. }) = &program.body[0] {
+        panic!("flat rule must not introduce a nested Match");
     }
 }
 

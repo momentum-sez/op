@@ -23,7 +23,7 @@ jobs:
           set -euo pipefail
           scratch=$(mktemp -d)
           cd "$scratch"
-          git clone "https://github.com/${{ github.repository }}.git" repo
+          git clone "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git" repo
           cd repo
           git checkout "${{ github.sha }}"
           ls -la ..

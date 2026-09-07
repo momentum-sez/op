@@ -142,10 +142,30 @@ statements, conjectures, and open obligations. Preserve theorem hypotheses and
 proof rigor. Report the exact remaining obligation when an investigation ends
 without a proof. Never claim a build or scaffold proves the full system.
 
+## Integration branch and worktree discipline
+
+The integration branch is `develop`. Release branches change only by
+maintainer decision. Each write-capable agent works in its own worktree on a
+unique branch cut from the integration head. Subagents stage only. The main
+thread reviews, commits, and pushes. A session can end without warning. Write
+verified state and open obligations into a record in the worktree as work
+proceeds, and resume from that record. Commits carry no model or tool
+attribution.
+
+## System role
+
+Lex supplies jurisdictional rule logic. Op carries compliance obligations in
+executable operations. gstore keeps Merkle-authenticated state. Moxie prices
+and clears claims and their derivatives. Mass operates the legal entity behind
+a claim end to end. Recourse administers cases, authority records, outcomes,
+stays, execution coordination, and recovery. This repository owns the Op layer only.
+
 ## Purpose and routing
 
-Op is a typed effectful workflow language. It provides syntax, types, effects,
-gas analysis, deterministic lowering, host interfaces, and a primitive corpus.
+Op is a typed, stack-based bytecode with deterministic operational semantics
+for compliance-carrying operations (`README.md`). It provides syntax, types,
+effects, gas analysis, deterministic lowering, host interfaces, and a primitive
+corpus. Lex, the jurisdictional rule language, compiles into Op.
 Public companions are `github.com/momentum-sez/lex`,
 `github.com/momentum-sez/gstore`, and `github.com/momentum-sez/stack`.
 
@@ -183,11 +203,16 @@ and open obligations precisely.
 Run commands from the repository root:
 
 ```bash
-cargo check --workspace
-cargo test --workspace
-cargo clippy --workspace -- -D warnings
+cargo fmt --all -- --check
+cargo check --workspace --all-targets
+cargo test --workspace --all-targets
+cargo clippy --workspace --all-targets -- -D warnings
 cargo run -p op-core --example hello-op
 ```
+
+These commands match `.github/workflows/ci.yml`. The `forbidden-strings`,
+`cold-clone`, and `coq` workflows run on pushes to `main`, `master`, and
+`develop`, and on pull requests.
 
 Start with the affected crate or example. Broaden to the workspace for shared
 contracts or compiler changes. Formal edits follow the current project build

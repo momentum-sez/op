@@ -79,6 +79,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::const_is_empty)] // const slice: the assertion documents the corpus contract
     fn canonical_corpus_is_non_empty() {
         assert!(!CANONICAL_PRIMITIVES.is_empty());
     }
@@ -150,7 +151,9 @@ mod tests {
         // the op-core→op-stdlib direction: a deferred op-core primitive absent
         // from the corpus cannot exist, because op-core's predicate matches
         // only `create.entity`, which IS in the corpus.
-        assert!(op_core::effects::canonical_is_deferred_subject("create.entity"));
+        assert!(op_core::effects::canonical_is_deferred_subject(
+            "create.entity"
+        ));
         for shape in CANONICAL_PRIMITIVES {
             if shape.name != "create.entity" {
                 assert!(

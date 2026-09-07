@@ -44,8 +44,8 @@ pub enum ContentAddressError {
 /// program's real bytes; a silent `""` fallback would make distinct programs
 /// share an id.
 pub fn content_address(program: &OpProgram) -> Result<ContentAddress, ContentAddressError> {
-    let canonical =
-        serde_json::to_string(program).map_err(|e| ContentAddressError::Serialize(e.to_string()))?;
+    let canonical = serde_json::to_string(program)
+        .map_err(|e| ContentAddressError::Serialize(e.to_string()))?;
     let h = fnv1a_64(canonical.as_bytes());
     Ok(ContentAddress {
         hash: h,

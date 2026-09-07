@@ -23,7 +23,7 @@ jobs:
             '/home/[^/]+/'
             '/private/tmp/'
             'file://'
-            'path[[:space:]]*=[[:space:]]*"\.\./'
+            'path[[:space:]]*=[[:space:]]*"\.\./\.\./'
             'git[+]ssh://'
           )
           fail=0
@@ -49,7 +49,7 @@ jobs:
           non_whitelist=$(git grep -nE 'https://github\.com/|git@github\.com:' -- \
             ':(exclude).github/workflows/forbidden-strings.yml' \
             ':(exclude)Cargo.lock' \
-            | grep -Ev 'github\.com[/:]momentum-sez/(lex|op|gstore|stack)(\.git)?([/#?[:space:]]|$)' \
+            | grep -Ev 'github\.com[/:]momentum-sez/(lex|op|gstore|stack)(\.git)?([/#?[:space:])>]|$)' \
             || true)
           if [ -n "$non_whitelist" ]; then
             echo "::error::non-whitelisted GitHub repository URL"

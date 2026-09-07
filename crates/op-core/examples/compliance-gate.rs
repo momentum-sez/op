@@ -283,8 +283,8 @@ fn program_digest(program: &OpProgram) -> String {
     // Fail loud rather than hashing the empty string on a serialization
     // failure (which would collapse distinct programs to one digest — the
     // same silent-fallback class hardened in op-compiler/hash.rs, OP-3).
-    let canonical = serde_json::to_string(program)
-        .expect("OpProgram must serialize for content addressing");
+    let canonical =
+        serde_json::to_string(program).expect("OpProgram must serialize for content addressing");
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
     for byte in canonical.bytes() {
         h ^= byte as u64;

@@ -296,7 +296,11 @@ pub fn typecheck_program(program: &OpProgram) -> TypeCheckResult {
     // ceiling. Use `checked_mul` and reject on overflow (fail loud). See F10.
     let mut extensional_bound: Option<u64> = None;
     if let Some(c) = program.gas_budget.cardinality_certificate.as_ref() {
-        match program.gas_budget.per_element_gas.checked_mul(c.cardinality) {
+        match program
+            .gas_budget
+            .per_element_gas
+            .checked_mul(c.cardinality)
+        {
             Some(bound) => extensional_bound = Some(bound),
             None => errors.push(format!(
                 "extensional gas bound overflows u64: per_element_gas {} × cardinality {} \
@@ -1258,9 +1262,7 @@ fn join_variant_arm_types(arm_types: &[OpType]) -> Result<Option<OpType>, String
     // Union only applies when every arm is a variant. Otherwise the caller's
     // structural-equality rule handles it (including the genuine error of
     // mixing a variant arm with a non-variant arm).
-    let all_variants = arm_types
-        .iter()
-        .all(|t| matches!(t, OpType::Variant(_)));
+    let all_variants = arm_types.iter().all(|t| matches!(t, OpType::Variant(_)));
     if !all_variants {
         return Ok(None);
     }
@@ -1314,9 +1316,7 @@ fn join_match_arm_types(arm_types: &[(String, OpType)]) -> Result<OpType, String
         match &expected {
             Some(exp) if exp != ty => {
                 if label == "<catch-all>" {
-                    return Err(format!(
-                        "match catch-all has type {ty:?}, expected {exp:?}"
-                    ));
+                    return Err(format!("match catch-all has type {ty:?}, expected {exp:?}"));
                 }
                 return Err(format!(
                     "match arm `{label}` has type {ty:?}, expected {exp:?}"
@@ -1549,9 +1549,7 @@ fn discharge_witness(
             for e in trace {
                 match e {
                     Effect::ProofEmit => obligation_emitted = true,
-                    Effect::SovereignWrite
-                    | Effect::IdentityMutation
-                    | Effect::FiscalTransfer
+                    Effect::SovereignWrite | Effect::IdentityMutation | Effect::FiscalTransfer
                         if !obligation_emitted =>
                     {
                         return Err(format!(
@@ -1592,9 +1590,9 @@ fn trace_block(stmts: &[Statement], acc: &mut Vec<Effect>) {
                     trace_step_body(&comp.body, acc);
                 }
             }
-            Statement::Let { value, .. }
-            | Statement::Return(value)
-            | Statement::Expr(value) => trace_expr(value, acc),
+            Statement::Let { value, .. } | Statement::Return(value) | Statement::Expr(value) => {
+                trace_expr(value, acc)
+            }
             Statement::Run { call, .. } => trace_expr(call, acc),
             Statement::Par { branches } => {
                 for (_name, expr) in branches {
@@ -2199,7 +2197,10 @@ mod tests {
             corridor_id: "corr-a".to_string(),
         };
         assert!(check_expr(&lock, &mut ctx).is_ok());
-        let field = OpExpr::Field(Box::new(OpExpr::Var("account".to_string())), "balance".to_string());
+        let field = OpExpr::Field(
+            Box::new(OpExpr::Var("account".to_string())),
+            "balance".to_string(),
+        );
         let err = check_expr(&field, &mut ctx).unwrap_err();
         assert!(
             err.contains("locked-resource-access"),
@@ -2234,8 +2235,14 @@ mod tests {
             "commit through wrapper of a locked resource must succeed"
         );
         // The lock was actually eliminated and the linear consumed.
-        assert!(!ctx.is_locked("share"), "wrapper-commit must clear the lock");
-        assert!(ctx.is_consumed("share"), "wrapper-commit must consume the linear");
+        assert!(
+            !ctx.is_locked("share"),
+            "wrapper-commit must clear the lock"
+        );
+        assert!(
+            ctx.is_consumed("share"),
+            "wrapper-commit must consume the linear"
+        );
         // A second elimination through the same wrapper must now fail (no
         // locked resource remains) — proving the first commit was not a no-op.
         let commit_again = OpExpr::CommitTransfer {
@@ -2300,7 +2307,10 @@ mod tests {
             "release through field wrapper must succeed"
         );
         assert!(!ctx.is_locked("account"), "release must clear the lock");
-        assert!(!ctx.is_consumed("account"), "release must not consume the linear");
+        assert!(
+            !ctx.is_consumed("account"),
+            "release must not consume the linear"
+        );
     }
 
     /// F5 — commit_transfer destructures `Locked<T>` and yields the committed
@@ -2548,10 +2558,7 @@ mod tests {
         );
         // The join is a supertype of each arm: a program declaring the full
         // union as its output must accept this match body.
-        assert!(matches!(
-            check_expr(&m, &mut ctx.clone()),
-            Ok(())
-        ));
+        assert!(matches!(check_expr(&m, &mut ctx.clone()), Ok(())));
     }
 
     /// 3+ distinct constructors join to the full union. Built by nesting: the
@@ -2853,7 +2860,10 @@ mod tests {
             }),
         };
         let res = typecheck_program(&prog);
-        assert!(!res.success, "overflowing extensional bound must be rejected");
+        assert!(
+            !res.success,
+            "overflowing extensional bound must be rejected"
+        );
         assert!(
             res.errors
                 .iter()
@@ -2880,10 +2890,7 @@ mod tests {
         };
         let res = typecheck_program(&prog);
         assert!(res.success, "representable bound: {:?}", res.errors);
-        assert_eq!(
-            res.gas_analysis.unwrap().max_extensional_gas,
-            Some(43_000)
-        );
+        assert_eq!(res.gas_analysis.unwrap().max_extensional_gas, Some(43_000));
     }
 
     /// F11 — `AssertSafety` buried inside a match arm body is still fail-loud
@@ -3008,7 +3015,8 @@ mod tests {
             assert!(
                 res.errors
                     .iter()
-                    .any(|e| e.contains("structural gas bound") && e.contains("exceeds declared budget")),
+                    .any(|e| e.contains("structural gas bound")
+                        && e.contains("exceeds declared budget")),
                 "over-budget structural gas must be surfaced, got {:?}",
                 res.errors
             );
@@ -3080,8 +3088,9 @@ mod tests {
         let res = typecheck_program(&prog);
         assert!(!res.success, "undischarged sanctions LexRule must fail");
         assert!(
-            res.errors.iter().any(|e| e.contains("is not discharged")
-                && e.contains("sanctions_check")),
+            res.errors
+                .iter()
+                .any(|e| e.contains("is not discharged") && e.contains("sanctions_check")),
             "must name the undischarged sanctions obligation, got {:?}",
             res.errors
         );
@@ -3114,7 +3123,11 @@ mod tests {
     fn no_lex_rule_contracts_is_inert() {
         let prog = trivial_program(vec![Statement::Return(OpExpr::Unit)]);
         let res = typecheck_program(&prog);
-        assert!(res.success, "no-LexRule program unaffected: {:?}", res.errors);
+        assert!(
+            res.success,
+            "no-LexRule program unaffected: {:?}",
+            res.errors
+        );
     }
 
     /// `governance_request` discharge: rejected without the effect, accepted
@@ -3164,7 +3177,8 @@ mod tests {
             "missing certificate proof_emit must fail"
         );
 
-        let mut present = trivial_program(vec![step_with_effects("attest", vec![Effect::ProofEmit])]);
+        let mut present =
+            trivial_program(vec![step_with_effects("attest", vec![Effect::ProofEmit])]);
         present.contracts = Contracts {
             requires: vec![],
             ensures: vec![lex_rule(DischargeRequirement::CertificateEmitted)],

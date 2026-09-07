@@ -761,8 +761,8 @@ fn reduce_args(args: &[(String, OpExpr)]) -> BTreeMap<String, Value> {
 fn render_certificate(t_a: &Tensor, t_b: &Tensor, phi: Phi, outcome: &ExecutionOutcome) {
     println!("composed tensor (T_AB = T_A meet_phi T_B):");
     println!(
-        "  {:<22} {:<24} {:<14} {:<14} {:<16} {}",
-        "domain", "source", "T_A", "T_B", "T_AB", "reason"
+        "  {:<22} {:<24} {:<14} {:<14} {:<16} reason",
+        "domain", "source", "T_A", "T_B", "T_AB"
     );
     for e in &outcome.composed.entries {
         let lhs = e.t_a.map(|v| v.as_str()).unwrap_or("undefined");

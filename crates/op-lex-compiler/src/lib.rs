@@ -492,9 +492,7 @@ fn join_inferred_arm_types(arm_types: Vec<OpType>) -> OpType {
     if arm_types.is_empty() {
         return OpType::Unit;
     }
-    let all_variants = arm_types
-        .iter()
-        .all(|t| matches!(t, OpType::Variant(_)));
+    let all_variants = arm_types.iter().all(|t| matches!(t, OpType::Variant(_)));
     if !all_variants {
         return arm_types.into_iter().next().unwrap_or(OpType::Unit);
     }
@@ -502,7 +500,9 @@ fn join_inferred_arm_types(arm_types: Vec<OpType>) -> OpType {
     for ty in &arm_types {
         if let OpType::Variant(constructors) = ty {
             for (tag, payload_ty) in constructors {
-                union.entry(tag.clone()).or_insert_with(|| payload_ty.clone());
+                union
+                    .entry(tag.clone())
+                    .or_insert_with(|| payload_ty.clone());
             }
         }
     }
@@ -896,18 +896,22 @@ mod tests {
         // LexRule; the sanctions-dominance body emits a `sanctions.check`
         // (SanctionsCheck effect), so `compile_lex`'s internal type-check
         // structurally discharges it (§3.2) and the program compiles.
-        use op_core::{Contract, Contracts, DischargeRequirement, LexRuleHash, LexRuleRef, PackVersion, QualIdent};
+        use op_core::{
+            Contract, Contracts, DischargeRequirement, LexRuleHash, LexRuleRef, PackVersion,
+            QualIdent,
+        };
         let rule = Contract::LexRule(LexRuleRef {
             rule_hash: LexRuleHash("b3:0xa1c2".to_string()),
             jurisdiction: QualIdent("sc".to_string()),
             pack_version: PackVersion("curator:sc-dict@v1.4.0".to_string()),
             discharge: DischargeRequirement::SanctionsCheck,
         });
-        let ctx = CompileCtx::with_canonical_prelude("entity.incorporate")
-            .with_lex_contracts(Contracts {
+        let ctx = CompileCtx::with_canonical_prelude("entity.incorporate").with_lex_contracts(
+            Contracts {
                 requires: vec![rule.clone()],
                 ensures: vec![],
-            });
+            },
+        );
         let term = LexTerm::sanctions_dominance_of(LexTerm::const_string("entity-0"));
         let program = compile_lex(&term, &ctx).expect("discharged LexRule must compile");
         // The emitted program actually carries the declared contract.
@@ -920,9 +924,12 @@ mod tests {
         // The host declares a `SanctionsCheck` LexRule but the body is a bare
         // boolean constant (no effects, no sanctions_check). `compile_lex`'s
         // internal type-check must reject the emitted program (fail-closed).
-        use op_core::{Contract, Contracts, DischargeRequirement, LexRuleHash, LexRuleRef, PackVersion, QualIdent};
-        let ctx = CompileCtx::with_canonical_prelude("trivial.const")
-            .with_lex_contracts(Contracts {
+        use op_core::{
+            Contract, Contracts, DischargeRequirement, LexRuleHash, LexRuleRef, PackVersion,
+            QualIdent,
+        };
+        let ctx =
+            CompileCtx::with_canonical_prelude("trivial.const").with_lex_contracts(Contracts {
                 requires: vec![Contract::LexRule(LexRuleRef {
                     rule_hash: LexRuleHash("b3:0x7f8e".to_string()),
                     jurisdiction: QualIdent("sc".to_string()),
