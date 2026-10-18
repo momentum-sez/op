@@ -43,6 +43,19 @@
 //! corridor digest, so a third-party verifier re-running the protocol
 //! confirms that the Seychelles zone was not asked — and could not have
 //! been asked — to rule on the ADGM-specific domain under this corridor.
+//!
+//! The program calls only canonical primitives. Zone tensors, the
+//! translation `phi`, and the meet under `phi` are host policy. The
+//! canonical corpus has no primitive for them:
+//!
+//!   - `screening.sanctions` screens the entity in one zone. The host
+//!     returns the compliance tensor of that zone.
+//!   - `attestation.emit` attests the composed tensor. The host holds `phi`
+//!     for the named corridor and computes `T_AB` in this call.
+//!   - `filing.registry_amendment` registers the branch in the
+//!     destination registry.
+//!
+//! Op carries the scaffolding. The host carries the policy.
 
 use op_core::host::{HostError, HostOutcome, OpHost, PrimitiveCall};
 use op_core::{
@@ -128,13 +141,14 @@ fn main() {
 // ---------------------------------------------------------------------------
 
 fn build_program() -> OpProgram {
-    // Step 1: fetch the zone-A tensor under the `in adgm_zone { ... }`
-    // scope. The step carries the sanctions_check effect so the downstream
-    // sovereign_write is dominated.
+    // Step 1: screen the entity in zone A under the `in adgm_zone { ... }`
+    // scope. The host returns the zone-A tensor. The canonical row of
+    // `screening.sanctions` carries the sanctions_check effect, so the step
+    // dominates the downstream sovereign_write.
     let fetch_t_a = OpStep {
         id: "t_a".to_string(),
         body: StepBody::Primitive(
-            Primitive("tensor.fetch".to_string()),
+            Primitive("screening.sanctions".to_string()),
             vec![
                 (
                     "entity_id".to_string(),
@@ -157,11 +171,12 @@ fn build_program() -> OpProgram {
         contracts: Contracts::default(),
     };
 
-    // Step 2: fetch the zone-B tensor.
+    // Step 2: screen the entity in zone B. The host returns the zone-B
+    // tensor.
     let fetch_t_b = OpStep {
         id: "t_b".to_string(),
         body: StepBody::Primitive(
-            Primitive("tensor.fetch".to_string()),
+            Primitive("screening.sanctions".to_string()),
             vec![
                 (
                     "entity_id".to_string(),
@@ -176,7 +191,7 @@ fn build_program() -> OpProgram {
                 ("zone".to_string(), OpType::String),
             ]),
             output: OpType::Record(vec![("tensor".to_string(), OpType::ContentDigest)]),
-            effects: vec![Effect::ExternalRead],
+            effects: vec![Effect::SanctionsCheck, Effect::ExternalRead],
         },
         wait: None,
         on_failure: None,
@@ -184,47 +199,15 @@ fn build_program() -> OpProgram {
         contracts: Contracts::default(),
     };
 
-    // Step 3: fetch the corridor translation phi. Returns an opaque phi
-    // handle (ContentDigest) that the composition step consumes.
-    let fetch_phi_step = OpStep {
-        id: "phi".to_string(),
-        body: StepBody::Primitive(
-            Primitive("corridor.fetch_translation".to_string()),
-            vec![
-                ("corridor".to_string(), OpExpr::Var("corridor".to_string())),
-                (
-                    "source_domains".to_string(),
-                    OpExpr::String("adgm".to_string()),
-                ),
-                (
-                    "target_domains".to_string(),
-                    OpExpr::String("seychelles".to_string()),
-                ),
-            ],
-        ),
-        signature: StepSignature {
-            input: OpType::Record(vec![
-                ("corridor".to_string(), OpType::String),
-                ("source_domains".to_string(), OpType::String),
-                ("target_domains".to_string(), OpType::String),
-            ]),
-            output: OpType::Record(vec![("phi".to_string(), OpType::ContentDigest)]),
-            effects: vec![Effect::ExternalRead],
-        },
-        wait: None,
-        on_failure: None,
-        compensate: None,
-        contracts: Contracts::default(),
-    };
-
-    // Step 4: compose via phi. The host fetches T_A and T_B, iterates the
-    // domain sets, and returns the composed tensor plus an image verdict.
+    // Step 3: attest the composition under phi. The host holds phi for the
+    // named corridor, composes T_A and T_B, and returns the composed tensor
+    // and the image verdict.
     let compose = OpStep {
         id: "t_ab".to_string(),
         body: StepBody::Primitive(
-            Primitive("tensor.compose_via_phi".to_string()),
+            Primitive("attestation.emit".to_string()),
             vec![
-                ("phi".to_string(), OpExpr::Var("phi".to_string())),
+                ("corridor".to_string(), OpExpr::Var("corridor".to_string())),
                 ("lhs".to_string(), OpExpr::Var("t_a".to_string())),
                 ("rhs".to_string(), OpExpr::Var("t_b".to_string())),
                 (
@@ -235,7 +218,7 @@ fn build_program() -> OpProgram {
         ),
         signature: StepSignature {
             input: OpType::Record(vec![
-                ("phi".to_string(), OpType::ContentDigest),
+                ("corridor".to_string(), OpType::String),
                 ("lhs".to_string(), OpType::ContentDigest),
                 ("rhs".to_string(), OpType::ContentDigest),
                 ("untranslated_policy".to_string(), OpType::String),
@@ -252,12 +235,12 @@ fn build_program() -> OpProgram {
         contracts: Contracts::default(),
     };
 
-    // Step 5: guarded choice — if image_verdict == "Compliant" then
-    // register_foreign_branch; else return BLOCKED.
+    // Step 4: guarded choice. If image_verdict == "Compliant", file the
+    // branch registration in the destination registry. Else return BLOCKED.
     let register = OpStep {
         id: "registration".to_string(),
         body: StepBody::Primitive(
-            Primitive("filing.foreign_branch_register".to_string()),
+            Primitive("filing.registry_amendment".to_string()),
             vec![
                 (
                     "entity_id".to_string(),
@@ -283,7 +266,7 @@ fn build_program() -> OpProgram {
                 ("composed_tensor".to_string(), OpType::ContentDigest),
             ]),
             output: OpType::Record(vec![("filing_id".to_string(), OpType::String)]),
-            effects: vec![Effect::SovereignWrite],
+            effects: vec![Effect::SovereignWrite, Effect::ProofEmit],
         },
         wait: None,
         on_failure: None,
@@ -376,7 +359,6 @@ fn build_program() -> OpProgram {
                 jurisdiction: "seychelles".to_string(),
                 body: vec![Statement::Step(fetch_t_b)],
             },
-            Statement::Step(fetch_phi_step),
             Statement::Step(compose),
             gate,
         ],
@@ -570,7 +552,7 @@ fn compose_via_phi(t_a: &Tensor, t_b: &Tensor, phi: &Phi) -> Composed {
 }
 
 // ---------------------------------------------------------------------------
-// Host — fulfills the four primitive calls the program issues.
+// Host — fulfills the three canonical primitives the program calls.
 // ---------------------------------------------------------------------------
 
 struct CorridorHost {
@@ -588,7 +570,9 @@ impl CorridorHost {
 impl OpHost for CorridorHost {
     fn invoke(&self, call: &PrimitiveCall) -> Result<HostOutcome, HostError> {
         match call.primitive.0.as_str() {
-            "tensor.fetch" => {
+            // One screen for each zone. The `zone` argument selects the
+            // tensor that the host returns.
+            "screening.sanctions" => {
                 let zone = call
                     .args
                     .get("zone")
@@ -607,14 +591,10 @@ impl OpHost for CorridorHost {
                     "entries": entries,
                 })))
             }
-            "corridor.fetch_translation" => Ok(HostOutcome::Completed(json!({
-                "phi": self.phi.digest,
-                "corridor_id": self.phi.corridor_id,
-                "a_side": self.phi.a_side_label,
-                "b_side": self.phi.b_side_label,
-                "coverage": self.phi.map.keys().collect::<Vec<_>>(),
-            }))),
-            "tensor.compose_via_phi" => {
+            // The attestation of the composed tensor. The host holds phi as
+            // corridor state, computes T_AB, and records the phi digest and
+            // coverage with the composed entries.
+            "attestation.emit" => {
                 let composed = compose_via_phi(&self.t_a, &self.t_b, &self.phi);
                 let entries: Vec<Value> = composed
                     .entries
@@ -631,10 +611,15 @@ impl OpHost for CorridorHost {
                 Ok(HostOutcome::Completed(json!({
                     "image_verdict": composed.image_verdict.as_str(),
                     "composed_tensor": format!("composed.blake3:{}", self.phi.digest),
+                    "phi": self.phi.digest,
+                    "corridor_id": self.phi.corridor_id,
+                    "a_side": self.phi.a_side_label,
+                    "b_side": self.phi.b_side_label,
+                    "coverage": self.phi.map.keys().collect::<Vec<_>>(),
                     "entries": entries,
                 })))
             }
-            "filing.foreign_branch_register" => {
+            "filing.registry_amendment" => {
                 // In a production host the evaluator resolves OpExpr::Var
                 // bindings before issuing the call; the reference evaluator
                 // in this example serializes a placeholder. Normalize it to
@@ -655,7 +640,7 @@ impl OpHost for CorridorHost {
 // ---------------------------------------------------------------------------
 // A tiny evaluator. Walks the top-level Statements the program emits and
 // fulfills the ones that carry primitive calls; the `Choose` branch is
-// decided by the image_verdict string returned from tensor.compose_via_phi.
+// decided by the image_verdict string returned from attestation.emit.
 // ---------------------------------------------------------------------------
 
 #[derive(Debug)]
