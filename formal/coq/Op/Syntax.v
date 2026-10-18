@@ -51,7 +51,7 @@
     ** Rocq 9.1.1 compatibility
 
     Built under Rocq 9.1.1. Uses the [Stdlib] import prefix
-    consistent with the rest of `~/op/formal/coq/`.
+    consistent with the rest of `formal/coq/`.
 *)
 
 From Stdlib Require Import Lists.List.

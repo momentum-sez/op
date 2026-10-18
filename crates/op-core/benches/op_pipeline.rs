@@ -39,11 +39,22 @@ fn hello_op_program() -> OpProgram {
         },
         inputs: vec![("entity_id".to_string(), OpType::EntityRef)],
         outputs: vec![("status".to_string(), OpType::String)],
-        effects: vec![Effect::SanctionsCheck, Effect::SovereignWrite],
+        effects: vec![
+            Effect::SanctionsCheck,
+            Effect::ExternalRead,
+            Effect::SovereignWrite,
+        ],
         participants: vec![],
         approval: None,
         contracts: Contracts::default(),
-        body: vec![gate_step(), write_step("activate")],
+        body: vec![
+            gate_step(),
+            write_step("activate"),
+            Statement::Return(OpExpr::Field(
+                Box::new(OpExpr::Var("activate".to_string())),
+                "status".to_string(),
+            )),
+        ],
         gas_budget: GasBudget::default(),
     }
 }
@@ -53,11 +64,19 @@ fn hello_op_program() -> OpProgram {
 /// effect-safety rule is satisfied.
 fn synthesize_program(n_steps: usize) -> OpProgram {
     assert!(n_steps >= 1, "N must be at least 1");
-    let mut body: Vec<Statement> = Vec::with_capacity(n_steps);
+    let mut body: Vec<Statement> = Vec::with_capacity(n_steps + 1);
     body.push(gate_step());
     for i in 1..n_steps {
         body.push(write_step(&format!("step_{i}")));
     }
+    body.push(Statement::Return(if n_steps == 1 {
+        OpExpr::String("SCREENED".to_string())
+    } else {
+        OpExpr::Field(
+            Box::new(OpExpr::Var(format!("step_{}", n_steps - 1))),
+            "status".to_string(),
+        )
+    }));
     OpProgram {
         name: format!("synth.{n_steps}.op"),
         jurisdiction: "_default".to_string(),
@@ -67,7 +86,11 @@ fn synthesize_program(n_steps: usize) -> OpProgram {
         },
         inputs: vec![("entity_id".to_string(), OpType::EntityRef)],
         outputs: vec![("status".to_string(), OpType::String)],
-        effects: vec![Effect::SanctionsCheck, Effect::SovereignWrite],
+        effects: vec![
+            Effect::SanctionsCheck,
+            Effect::ExternalRead,
+            Effect::SovereignWrite,
+        ],
         participants: vec![],
         approval: None,
         contracts: Contracts::default(),
@@ -167,15 +190,23 @@ fn execute(program: &OpProgram, host: &NoopHost) -> usize {
     count
 }
 
+fn primitive_step_count(program: &OpProgram) -> usize {
+    program
+        .body
+        .iter()
+        .filter(|stmt| matches!(stmt, Statement::Step(_)))
+        .count()
+}
+
 /// B1 — typecheck cost on hello-op + synthesized programs.
 fn bench_typecheck(c: &mut Criterion) {
     let mut group = c.benchmark_group("typecheck");
     let hello = hello_op_program();
-    group.throughput(Throughput::Elements(hello.body.len() as u64));
+    group.throughput(Throughput::Elements(primitive_step_count(&hello) as u64));
     group.bench_with_input(BenchmarkId::new("steps", "hello"), &hello, |b, p| {
         b.iter(|| {
             let result = typecheck_program(p);
-            assert!(result.success);
+            assert!(result.success, "{:?}", result.errors);
         });
     });
     for n in [16usize, 64, 256] {
@@ -184,7 +215,7 @@ fn bench_typecheck(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::new("steps", n), &program, |b, p| {
             b.iter(|| {
                 let result = typecheck_program(p);
-                assert!(result.success);
+                assert!(result.success, "{:?}", result.errors);
             });
         });
     }
@@ -196,11 +227,11 @@ fn bench_execute(c: &mut Criterion) {
     let mut group = c.benchmark_group("execute_noop");
     let host = NoopHost;
     let hello = hello_op_program();
-    group.throughput(Throughput::Elements(hello.body.len() as u64));
+    group.throughput(Throughput::Elements(primitive_step_count(&hello) as u64));
     group.bench_with_input(BenchmarkId::new("steps", "hello"), &hello, |b, p| {
         b.iter(|| {
             let executed = execute(p, &host);
-            assert_eq!(executed, p.body.len());
+            assert_eq!(executed, primitive_step_count(p));
         });
     });
     for n in [16usize, 64, 256] {
@@ -209,7 +240,7 @@ fn bench_execute(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::new("steps", n), &program, |b, p| {
             b.iter(|| {
                 let executed = execute(p, &host);
-                assert_eq!(executed, p.body.len());
+                assert_eq!(executed, primitive_step_count(p));
             });
         });
     }
@@ -225,11 +256,9 @@ fn bench_effect_row(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::new("steps", n), &program, |b, p| {
             b.iter(|| {
                 let row = program_effect_row(p);
-                // The composed row deduplicates: expect two entries —
-                // SanctionsCheck (from the gate) + SovereignWrite (from
-                // the writers). Assertion doubles as a sanity check
-                // that the benchmarked code path ran.
-                assert_eq!(row.len(), 2);
+                // The gate contributes SanctionsCheck and ExternalRead.
+                // The writers contribute SovereignWrite.
+                assert_eq!(row.len(), 3);
             });
         });
     }

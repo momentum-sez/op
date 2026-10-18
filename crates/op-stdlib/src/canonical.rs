@@ -66,7 +66,7 @@ impl PrimitiveShape {
 
 /// The canonical corpus (name↔family map).
 ///
-/// Each row mirrors the reference vocabulary visible in the live kernel corpus.
+/// Each row assigns a family to a primitive recognized by op-core.
 /// Every name here MUST be a primitive op-core's canonical effect table
 /// recognizes; the effect row and deferred-subject flag for each are derived
 /// from op-core (see [`PrimitiveShape`]). The `stdlib_*` parity tests in `lib.rs`
@@ -219,10 +219,7 @@ mod tests {
     fn every_primitive_has_effects_except_document_generation_only() {
         for p in CANONICAL_PRIMITIVES {
             if p.family == PrimitiveFamily::Document {
-                assert!(p
-                    .default_effects()
-                    .iter()
-                    .any(|e| *e == Effect::DocumentGeneration));
+                assert!(p.default_effects().contains(&Effect::DocumentGeneration));
             } else {
                 assert!(
                     !p.default_effects().is_empty(),

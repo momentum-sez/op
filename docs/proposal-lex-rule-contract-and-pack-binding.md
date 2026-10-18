@@ -8,17 +8,21 @@ the set of rules a curator pack binds to the program's
 level, structural at the type-checker level, and load-bearing for the
 Lex→Op binding the canonical languages have so far left as prose.
 
-Companion proposal:
-`~/lex/docs/frontier-work/09-rule-applies-to-and-pack-binding.md`
-(extends `DefeasibleRule` with `applies_to`; specifies the pack format
-this proposal consumes; the two proposals must land together).
+The [companion Lex proposal](https://github.com/momentum-sez/lex/blob/59b9280cb8a7120b98f5b2e858f6b24d4164194e/docs/frontier-work/09-rule-applies-to-and-pack-binding.md)
+defines rule scope and the pack format. The two languages must agree on
+that contract.
 
-This is a frontier design note, not a canonical language reference.
-Status doctrine (per `AGENTS.md`/`CLAUDE.md`): everything in this
-document is **proposed**; implementation lands as a sequence of PRs each
-of which promotes one line above frontier status only after the
-corresponding type-checker rule, formal scaffold, and worked example
-are in place.
+Implementation status, checked 6 September 2026: `Contract::LexRule`,
+`LexRuleRef.discharge`, and explicit `CompileCtx.lex_contracts` are implemented.
+The type checker checks four structural effect patterns supplied by the host.
+`compile_lex` preserves those contracts and rejects failed structural checks.
+
+Pack-derived obligations, pack completeness, subject and policy binding, and
+joint discharge soundness remain open integration and proof obligations.
+The cited [public Lex snapshot contains `lex-pack`](https://github.com/momentum-sez/lex/tree/59b9280cb8a7120b98f5b2e858f6b24d4164194e/crates/lex-pack).
+Op still needs a pack dependency
+and an active-pack handle. The sections below specify the full target.
+The current language contract remains `docs/language-spec.md`.
 
 ## 1. Motivation
 
@@ -38,14 +42,11 @@ on every `OpProgram` (`crates/op-core/src/ast.rs:22-48`), and
 `op-lex-compiler` has a place to put compiled rules
 (`crates/op-lex-compiler/src/lib.rs:315`).
 
-What is missing: the compiler currently produces `Contracts::default()`.
-Every Op program ships with empty contracts. This is not a Lex bug — it
-is a binding bug. There is no typed reference Op can put inside
-`Contracts::requires` that names a specific Lex rule, no completeness
-check that asks "is the program's set of declared rules sufficient for
-its `(operation_type, jurisdiction)` under the active pack?", and no
-mechanical discharge check that verifies the program's steps satisfy
-the rule's compiled predicate.
+The compiler copies explicit contracts from `CompileCtx.lex_contracts`.
+Its default context has empty contracts. `Contract::LexRule` provides the
+typed rule reference and carries a host-supplied structural obligation.
+The remaining binding work must derive those obligations from verified packs
+and check their completeness for the program's operation and jurisdiction.
 
 The companion Lex proposal supplies one half: rules now declare typed
 `applies_to: { jurisdictions, operation_kinds }`, and a pack bundles
@@ -56,7 +57,7 @@ the other half.
 
 ### 2.1 AST extension
 
-`crates/op-core/src/ast.rs` defines `Contract` (today's variants):
+The initial `Contract` shape had two variants:
 
 ```rust
 pub enum Contract {
@@ -65,7 +66,8 @@ pub enum Contract {
 }
 ```
 
-Add one variant:
+The implementation adds `LexRule` and an explicit discharge requirement.
+The full target, with bindings verified against a pack, has this shape:
 
 ```rust
 pub enum Contract {
@@ -91,6 +93,8 @@ pub struct LexRuleRef {
     /// declared pack version does not match the active pack at compile
     /// time. This is the deterministic-replay binding.
     pub pack_version: PackVersion,
+    /// Structural obligation derived from the verified pack rule.
+    pub discharge: DischargeRequirement,
 }
 ```
 
@@ -148,11 +152,9 @@ of those rules in its `requires` block (the rule is one the program
 must satisfy). If the program's declared set omits a rule the pack
 binds, the program does not type-check.
 
-This is the gate that closes the "operation YAML/program is silently
-non-compliant" failure mode the kernel currently has at boot. After
-this rule, an Op program that does not name every required Lex rule
-for its jurisdiction is rejected before it can be admitted to any
-host.
+The proposed gate rejects programs that omit required rules before host
+admission. Current Op checks explicit obligations only. Pack completeness
+remains an integration obligation.
 
 ### 3.2 Structural discharge per rule
 
@@ -188,7 +190,7 @@ the rule's compiled predicate. The exact rules:
 
 This list is not exhaustive. The full grammar of structural-discharge
 patterns is the contract `lex-core` + `op-stdlib` + `op-core` agree on
-in `~/lex/docs/frontier-work/09` §3.2's `CompiledTerm`. New patterns
+in the companion Lex proposal §3.2's `CompiledTerm`. New patterns
 are added by joint PR; neither language adds patterns unilaterally.
 
 The Lex evaluator is **never** re-run at the Op compile boundary.
@@ -247,17 +249,17 @@ program is always fully explicit.
 
 ### 4.3 YAML lowering
 
-Legacy YAML operation files are lowered to Op via `op-compiler`
-(`crates/op-compiler`). After this proposal lands, every YAML lowering
-produces a fully explicit Op program with `Contract::LexRule` entries
-populated from the active pack. YAML authors do not write `applies_to`
-and do not write rule hashes; the lowering pipeline does it. YAML
-remains an import affordance, not a canonical Op surface.
+`crates/op-compiler/src/lower.rs` lowers YAML operation definitions to Op.
+The proposed pack integration would populate each program's `Contract::LexRule`
+entries from the active pack. The lowering pipeline would resolve rule scope
+and hashes while authors specify the operation and jurisdiction.
+Current YAML lowering has no active-pack handle.
+YAML remains an import affordance, not a canonical Op surface.
 
 ## 5. Op-Lex-Compiler: from `Contracts::default()` to populated contracts
 
-`crates/op-lex-compiler/src/lib.rs:315` today produces empty contracts.
-After this proposal:
+`build_program` currently copies `ctx.lex_contracts` into the emitted program.
+Pack-derived population remains open. Its target is:
 
 ```rust
 fn build_program(/* ... */) -> Result<Program, CompileError> {
@@ -270,6 +272,7 @@ fn build_program(/* ... */) -> Result<Program, CompileError> {
             rule_hash: p.rule_hash.clone(),
             jurisdiction: jurisdiction.clone(),
             pack_version: pack.version.clone(),
+            discharge: derive_requirement(p),
         }))
         .collect();
 
@@ -288,10 +291,9 @@ fn build_program(/* ... */) -> Result<Program, CompileError> {
 }
 ```
 
-The `op-lex-compiler` is the canonical implementation of "given an
-operation kind and a jurisdiction and a pack, what Lex rules apply".
-Other Op hosts may implement their own (kernels, regulators, audit
-tools), but the canonical implementation lives here.
+The proposed `op-lex-compiler` integration derives applicable rules from the
+operation, jurisdiction, and verified pack. Other hosts may implement this
+public contract for execution services, regulators, and audit tools.
 
 ## 6. Pack consumption protocol
 
@@ -303,16 +305,16 @@ host supplies the pack at compile time. Three boundaries:
    replayable against the pack snapshot at the version it was built
    under.
 2. **Validation host.** Any party verifying a program (regulator,
-   auditor, peer kernel) can re-run the type checker by supplying the
+   auditor, peer host) can re-run the type checker by supplying the
    same pack version. Pack content-addressing makes this exact.
-3. **Execution host.** A sovereign kernel admits a program only if its
+3. **Execution host.** The proposed host admits a program only if its
    active pack is `>=` the program's `LexRuleRef.pack_version`. Forward
    compatibility (newer pack, older program) is allowed if the newer
    pack's `applies_to` set is a superset; backward compatibility
    (older pack, newer program) is rejected.
 
-Pack discovery, signature verification, and pinning are host concerns,
-not Op-language concerns. Op specifies only the reference shape and
+Pack discovery, signature verification, trust policy, and pinning are
+host concerns, not Op-language concerns. Op specifies only the reference shape and
 the type-checker contract.
 
 ## 7. Effect-row interaction
@@ -375,12 +377,11 @@ discipline):
   the binding's soundness; until it exists, `Contract::LexRule` is just a
   data shape.
 
-The joint theorem is the fence-post. Until it is proved, the
-`Contract::LexRule` extension is admitted as scaffold; the production
-mode is "type checker rejects under-declaration but host re-runs Lex
-evaluator on the predicate body for cross-validation". Once the
-joint theorem is closed, the host re-execution can be removed and
-the type checker becomes load-bearing.
+The joint theorem remains required before structural checks can establish
+complete rule discharge. Current checks validate supplied effect patterns.
+Pack completeness and binding to rule subjects, policies, and certificates
+still need implementation. A host must validate rule semantics independently
+until implementation and proof establish the full contract.
 
 ## 10. Open obligations
 
@@ -398,18 +399,17 @@ the type checker becomes load-bearing.
 2. **Pack signature scheme.** The companion proposal specifies hybrid
    PQ. This proposal must specify the exact verification interface
    (`pack.verify_signature(curator_did) -> Result<()>`) and the
-   canonical verifier backing it. Op owns its own verifier rather than
-   importing an external one; the canonical verifier lives in a new
-   `op-pack-verify` crate or, preferably, in `lex-pack` itself
-   alongside the pack format definition.
+   canonical verifier contract. The public verifier belongs in
+   `lex-pack` alongside the pack format, or in a dedicated public
+   `op-pack-verify` crate.
 3. **`structural_discharge` pattern grammar.** §3.2 lists four
    patterns. The full grammar is a joint Lex/Op artifact and lives
-   in `~/lex/docs/frontier-work/09` §6.3 (to be added in v2 of that
-   doc). Until that grammar stabilizes, the type checker accepts a
+   in the companion Lex proposal §6.3. The complete binding remains
+   open. Until that grammar stabilizes, the type checker accepts a
    conservative subset and the host re-runs the Lex evaluator on the
    predicate body for any pattern not in the subset. This is
-   demolition scaffolding: it has a deadline, an owner, and a
-   sunset.
+   an open integration requirement. Production adoption needs an
+   explicit owner and acceptance evidence.
 4. **Multi-pack composition.** A host may layer multiple packs (a
    federal pack, a ministerial pack, an industry-vertical pack). The
    completeness check (§3.1) takes the union of all their
@@ -439,19 +439,18 @@ languages, which today is prose, becomes a typed pack-mediated
 contract. Authoring binding becomes mechanical (compiler-driven from
 the pack); audit becomes mechanical (rule hashes are in the program
 source); replay becomes exact (pack version is pinned per
-reference). The kernel-private adapter pattern goes away because
-there is nothing kernel-private left to write.
+reference). Hosts consume the same public rule and workflow contracts.
 
 ## 12. Status
 
-Frontier proposal. Awaits:
+The explicit contract shape and structural checks are implemented.
+The full contract with verified pack bindings still requires:
 
-- Coordinated landing with companion Lex proposal.
-- `lex-pack` crate (proposed in companion §3.1).
-- `op-stdlib::canonical::primitives()` exported as the canonical
-  operation-kind source.
-- `formal/coq/Joint/Discharge.v` `lex_discharge_soundness` theorem.
-- A worked example: `~/op/examples/sc-incorporate-with-lex.rs` shows
-  the full pipeline end-to-end using a small example pack.
+- Coordinated integration with the companion Lex contract.
+- An active-pack handle and verified `lex-pack` consumption in Op.
+- Operation-kind validation against `op_stdlib::canonical::CANONICAL_PRIMITIVES`
+  and its existing `lookup` resolver.
+- `formal/coq/Joint/Discharge.v` and the `lex_discharge_soundness` theorem.
+- A worked example that exercises pack derivation, compilation, and execution.
 
-No production host should adopt this surface before all five land.
+Production adoption requires acceptance evidence for each obligation.

@@ -78,9 +78,10 @@ pub struct Contracts {
 /// the §3.1 *completeness against the active pack* check (query the pack for
 /// every rule whose `applies_to` matches `(operation_type, jurisdiction)` and
 /// reject if `requires` omits one) is NOT implemented here. It needs a pack
-/// handle on `CompileCtx` and the `lex-pack` crate (`Pack`,
-/// `CompiledLexPredicate`, `Pack::rules_for`), neither of which exists yet
-/// (companion `~/lex/docs/frontier-work/09` §3 — design-only). What IS
+/// handle on `CompileCtx` and integration with the public `lex-pack` crate
+/// (`Pack`, `CompiledLexPredicate`, `Pack::rules_for`). See the companion
+/// proposal in `momentum-sez/lex`,
+/// `docs/frontier-work/09-rule-applies-to-and-pack-binding.md` §3. What IS
 /// implemented and load-bearing is §3.2 per-rule structural discharge: the
 /// obligation is carried explicitly on the ref (the canonical fully-explicit
 /// form per proposal §4.1; `auto_lex`/pack population is sugar over it), so the

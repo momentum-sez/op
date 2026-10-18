@@ -170,10 +170,12 @@ impl Jurisdiction {
 /// NO active-pack handle, so the compiler does not yet resolve
 /// `pack.rules_for(jurisdiction, operation_type)` to *derive* the contracts
 /// from a pack (it emits what the host explicitly supplies in `lex_contracts`).
-/// Pack-driven population — and the §3.1 completeness check it feeds — depends
-/// on the `lex-pack` crate (`Pack`, `CompiledLexPredicate`, `Pack::rules_for`),
-/// which does not exist yet (companion `~/lex/docs/frontier-work/09` §3,
-/// design-only). `auto_lex` is sugar over the explicit form (proposal §4.2);
+/// Pack-driven population and the §3.1 completeness check require integration
+/// with `lex-pack` (`Pack`, `CompiledLexPredicate`, `Pack::rules_for`).
+/// This crate has no pack dependency or active-pack handle. See the companion
+/// proposal in `momentum-sez/lex`,
+/// `docs/frontier-work/09-rule-applies-to-and-pack-binding.md` §3.
+/// `auto_lex` is proposed syntax for the explicit form (proposal §4.2);
 /// the canonical program is always fully explicit, which is what `lex_contracts`
 /// holds.
 #[derive(Debug, Clone)]
