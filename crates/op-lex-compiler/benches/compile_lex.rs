@@ -15,9 +15,7 @@
 //! is set so Criterion reports per-term throughput (terms/sec).
 
 use criterion::{criterion_group, criterion_main, Criterion, Throughput};
-use op_lex_compiler::{
-    compile_lex, CompileCtx, LexBranch, LexException, LexTerm, LexValue, Witness,
-};
+use op_lex_compiler::{compile_lex, CompileCtx, LexBranch, LexException, LexTerm, Witness};
 
 /// Build a 100-term workload mixing all six §6.2 compilation cases.
 /// The mix is deterministic: 20 constants, 20 prelude vars, 15
@@ -47,25 +45,22 @@ fn build_workload() -> Vec<LexTerm> {
         terms.push(LexTerm::var(name, i as u32));
     }
 
-    // 15 pattern matches on a two-branch variant scrutinee.
+    // 15 two-branch pattern matches on a Bool scrutinee. The admissibility
+    // gate decides exhaustiveness over the constructor set {true, false}.
+    // A variant literal cannot carry two branches. Its constructor set at
+    // the match site is only its own tag, so the gate rejects the other
+    // branch.
     for i in 0..15 {
         terms.push(LexTerm::Match {
-            scrutinee: Box::new(LexTerm::Const(LexValue::Variant {
-                tag: if i % 2 == 0 {
-                    "yes".to_string()
-                } else {
-                    "no".to_string()
-                },
-                payload: Box::new(LexValue::Unit),
-            })),
+            scrutinee: Box::new(LexTerm::const_bool(i % 2 == 0)),
             branches: vec![
                 LexBranch {
-                    tag: "yes".to_string(),
+                    tag: "true".to_string(),
                     binder: "_".to_string(),
                     body: LexTerm::const_bool(true),
                 },
                 LexBranch {
-                    tag: "no".to_string(),
+                    tag: "false".to_string(),
                     binder: "_".to_string(),
                     body: LexTerm::const_bool(false),
                 },

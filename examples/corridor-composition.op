@@ -23,6 +23,7 @@ effects {
   sanctions_check;
   sovereign_write;
   proof_emit;
+  external_read;
 }
 
 contracts {
@@ -32,27 +33,21 @@ contracts {
 
 do {
   in adgm_zone {
-    run t_a = tensor.fetch({
+    run t_a = screening.sanctions({
       entity_id: entity_id,
       zone: "adgm"
     });
   }
 
   in seychelles_zone {
-    run t_b = tensor.fetch({
+    run t_b = screening.sanctions({
       entity_id: entity_id,
       zone: "seychelles"
     });
   }
 
-  run phi = corridor.fetch_translation({
+  run t_ab = attestation.emit({
     corridor: corridor,
-    source_domains: "adgm",
-    target_domains: "seychelles"
-  });
-
-  run t_ab = tensor.compose_via_phi({
-    phi: phi,
     lhs: t_a,
     rhs: t_b,
     untranslated_policy: "NotApplicable"
@@ -60,7 +55,7 @@ do {
 
   choose {
     when t_ab.image_verdict == "Compliant" -> {
-      run registration = filing.foreign_branch_register({
+      run registration = filing.registry_amendment({
         entity_id: entity_id,
         target_zone: target_zone,
         composed_tensor: t_ab
