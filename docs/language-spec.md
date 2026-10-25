@@ -105,6 +105,47 @@ outputs, ambient jurisdiction, time-derived extras, and caller identity. The
 important change relative to string-interpolated workflow configuration is
 that bindings become typed names instead of string paths.
 
+### 2.1. Authored purpose envelopes
+
+An authored purpose identifies the intended role of a program.
+`ProgramPurposeTag` is the shared scalar from the public Lex `mez-canonical` crate.
+It accepts one or more dot-separated ASCII segments matching `[A-Za-z_][A-Za-z0-9_]*`, with at most 255 bytes in total.
+It preserves case and rejects whitespace and empty segments. It does not normalize input.
+A valid tag does not establish that a purpose exists or is supported.
+
+`AuthoredOpProgramV1` requires three JSON fields: `version: 1`, `purpose`, and `program`.
+The `program` field contains the existing `OpProgram` AST.
+`parse_program_v1` rejects missing fields, unknown envelope fields, unsupported versions, and malformed purpose tags.
+Construction and deserialization apply the existing structural and type checks to the actual inner program.
+Those checks retain their current scope and do not establish runtime execution or external authority.
+
+`lower_yaml_v1` and `compile_yaml_v1` require the same envelope fields in YAML.
+The inner `program` uses the existing YAML operation grammar.
+Its metadata version remains separate from the envelope version.
+
+```yaml
+version: 1
+purpose: entity.onboarding
+program:
+  operation: entity.prepare_minutes
+  jurisdiction: _default
+  version: "1.0.0"
+  steps:
+    - id: minutes
+      type: document.board_minutes
+```
+
+Both entry points retain the exact purpose through lowering.
+`compile_yaml_v1` returns `CompiledProgramV1`, which keeps the purpose beside the existing compiled result.
+`compile_lex_v1` requires an `AuthoredCompileCtxV1` with an explicit purpose and returns an `AuthoredOpProgramV1`.
+It accepts the existing admissible-fragment `LexTerm`, not the full Lex source AST or `AuthoredLexProgramV1`.
+No entry point infers purpose from names, descriptions, operation families, or jurisdictions.
+
+The existing entry points return their existing types and do not establish version-one authored-purpose provenance.
+These envelopes leave existing AST serialization and FNV content addresses unchanged.
+The inner content address identifies only historical AST bytes and does not bind the purpose or envelope.
+It is not a native SAVM artifact identity, a cryptographic integrity proof, or a signed artifact identity.
+
 ## 3. Type System
 
 Op is statically typed. The typing judgment is

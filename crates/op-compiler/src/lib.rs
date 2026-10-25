@@ -23,9 +23,9 @@ pub mod hash;
 pub mod lower;
 
 pub use hash::{content_address, ContentAddress};
-pub use lower::{lower_yaml, LoweringError, LoweringReport};
+pub use lower::{lower_yaml, lower_yaml_v1, LoweringError, LoweringReport, LoweringReportV1};
 
-use op_core::{typecheck_program, GasEstimate, OpProgram, TypeCheckResult};
+use op_core::{typecheck_program, GasEstimate, OpProgram, ProgramPurposeTag, TypeCheckResult};
 use serde::{Deserialize, Serialize};
 
 /// A fully compiled Op program.
@@ -43,10 +43,53 @@ pub struct CompiledProgram {
     pub safety_verified: bool,
 }
 
+/// A compiled result together with its exact authored purpose.
+///
+/// The inner content address identifies only the historical AST bytes.
+/// It does not bind this envelope, the purpose, or a signed executable artifact.
+#[derive(Debug, Clone, Serialize)]
+pub struct CompiledProgramV1 {
+    version: u32,
+    purpose: ProgramPurposeTag,
+    compiled: CompiledProgram,
+}
+
+impl CompiledProgramV1 {
+    /// Return the exact authored purpose.
+    pub fn purpose(&self) -> &ProgramPurposeTag {
+        &self.purpose
+    }
+
+    /// Return the compiled AST, static checks, and historical content address.
+    pub fn compiled(&self) -> &CompiledProgram {
+        &self.compiled
+    }
+
+    /// Return both the authored purpose and the compiled result.
+    pub fn into_parts(self) -> (ProgramPurposeTag, CompiledProgram) {
+        (self.purpose, self.compiled)
+    }
+}
+
+/// Compile a strict version-one YAML envelope without inferring its purpose.
+pub fn compile_yaml_v1(yaml: &str) -> Result<CompiledProgramV1, LoweringError> {
+    let report = lower_yaml_v1(yaml)?;
+    let (purpose, program) = report.program.into_parts();
+    Ok(CompiledProgramV1 {
+        version: 1,
+        purpose,
+        compiled: compile_program(program)?,
+    })
+}
+
 /// Compile a YAML operation definition into a typed `OpProgram`.
 pub fn compile_yaml(yaml: &str) -> Result<CompiledProgram, LoweringError> {
     let report = lower_yaml(yaml)?;
-    let tc = typecheck_program(&report.program);
+    compile_program(report.program)
+}
+
+fn compile_program(program: OpProgram) -> Result<CompiledProgram, LoweringError> {
+    let tc = typecheck_program(&program);
     if !tc.success {
         return Err(LoweringError::TypeCheckFailed {
             errors: tc.errors.clone(),
@@ -65,10 +108,10 @@ pub fn compile_yaml(yaml: &str) -> Result<CompiledProgram, LoweringError> {
             .map(|g| g.needs_cardinality_cert)
             .unwrap_or(false),
     };
-    let content_address = content_address(&report.program)
-        .map_err(|e| LoweringError::ContentAddress(e.to_string()))?;
+    let content_address =
+        content_address(&program).map_err(|e| LoweringError::ContentAddress(e.to_string()))?;
     Ok(CompiledProgram {
-        program: report.program,
+        program,
         content_address,
         safety_verified: tc.failed_predicates.is_empty() && tc.deferred_predicates.is_empty(),
         type_check: tc,

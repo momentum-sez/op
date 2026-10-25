@@ -58,13 +58,31 @@ pub mod lift;
 pub use interp::{run_program, EvalResult};
 
 pub use ast::{LexBranch, LexException, LexLoc, LexTerm, LexValue, Witness};
-pub use context::{CompileCtx, Jurisdiction, PreludeBinding, PreludeCallable, PreludeLower};
+pub use context::{
+    AuthoredCompileCtxV1, CompileCtx, Jurisdiction, PreludeBinding, PreludeCallable, PreludeLower,
+};
 pub use error::{AdmissibilityViolation, CompileError};
 
 use op_core::{
-    typecheck_program, ApprovalMode, BinOp, Effect, MatchArm, OpExpr, OpProgram, OpType,
-    ProgramMetadata, Statement, UnOp,
+    typecheck_program, ApprovalMode, AuthoredOpProgramV1, BinOp, Effect, MatchArm, OpExpr,
+    OpProgram, OpType, ProgramMetadata, Statement, UnOp,
 };
+
+/// Compile the admissible Lex fragment and preserve its explicit authored purpose.
+///
+/// This entry point accepts this crate's [`LexTerm`], not the full Lex source AST.
+/// The existing admissibility, lowering, and emitted-program checks still apply.
+pub fn compile_lex_v1(
+    term: &LexTerm,
+    ctx: &AuthoredCompileCtxV1,
+) -> Result<AuthoredOpProgramV1, CompileError> {
+    let program = compile_lex(term, ctx.context())?;
+    AuthoredOpProgramV1::new(ctx.purpose().clone(), program).map_err(|error| {
+        CompileError::EmittedOpTypecheckFailed {
+            errors: vec![error.to_string()],
+        }
+    })
+}
 
 /// Compile an admissible Lex term into an Op program.
 ///

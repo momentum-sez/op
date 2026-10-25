@@ -36,9 +36,9 @@
 //! be tracked.
 
 use op_core::{
-    program_effect_row, CompensationClause, Contract, Contracts, Effect, FailureAction, GasBudget,
-    OpExpr, OpProgram, OpStep, OpType, Primitive, ProgramMetadata, Statement, StepBody,
-    StepSignature, WaitSpec,
+    program_effect_row, AuthoredOpProgramV1, CompensationClause, Contract, Contracts, Effect,
+    FailureAction, GasBudget, OpExpr, OpProgram, OpStep, OpType, Primitive, ProgramMetadata,
+    ProgramPurposeTag, Statement, StepBody, StepSignature, WaitSpec,
 };
 use serde::{Deserialize, Serialize};
 use serde_yaml::Value as YamlValue;
@@ -54,6 +54,23 @@ pub struct LoweringReport {
     /// they are carried for migration auditing so that the legacy corpus can
     /// be triaged without silently losing shape.
     pub warnings: Vec<String>,
+}
+
+/// A checked lowering result that retains the authored purpose.
+#[derive(Debug, Clone, Serialize)]
+pub struct LoweringReportV1 {
+    /// The purpose-bearing, checked Op program.
+    pub program: AuthoredOpProgramV1,
+    /// Warnings from the existing YAML lowering rules.
+    pub warnings: Vec<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AuthoredYamlProgramV1 {
+    version: u32,
+    purpose: ProgramPurposeTag,
+    program: YamlValue,
 }
 
 /// Errors the lowerer may surface.
@@ -169,15 +186,46 @@ pub enum LoweringError {
 pub fn lower_yaml(yaml: &str) -> Result<LoweringReport, LoweringError> {
     let doc: YamlValue =
         serde_yaml::from_str(yaml).map_err(|e| LoweringError::YamlParse(e.to_string()))?;
+    lower_document(&doc)
+}
+
+/// Lower a `version: 1`, `purpose`, and `program` YAML envelope.
+///
+/// The inner `program` uses the existing YAML grammar. The envelope is strict.
+pub fn lower_yaml_v1(yaml: &str) -> Result<LoweringReportV1, LoweringError> {
+    let source: AuthoredYamlProgramV1 =
+        serde_yaml::from_str(yaml).map_err(|e| LoweringError::YamlParse(e.to_string()))?;
+    if source.version != 1 {
+        return Err(LoweringError::ShapeError {
+            field: "version".to_string(),
+            detail: format!(
+                "expected authored program version 1, got {}",
+                source.version
+            ),
+        });
+    }
+    let report = lower_document(&source.program)?;
+    let program = AuthoredOpProgramV1::new(source.purpose, report.program).map_err(|error| {
+        LoweringError::TypeCheckFailed {
+            errors: vec![error.to_string()],
+        }
+    })?;
+    Ok(LoweringReportV1 {
+        program,
+        warnings: report.warnings,
+    })
+}
+
+fn lower_document(doc: &YamlValue) -> Result<LoweringReport, LoweringError> {
     let mut warnings = Vec::new();
 
-    let name = take_string(&doc, "operation")?;
-    let jurisdiction = take_string(&doc, "jurisdiction")?;
-    let version = take_string_opt(&doc, "version").unwrap_or_default();
-    let description = take_string_opt(&doc, "description").unwrap_or_default();
+    let name = take_string(doc, "operation")?;
+    let jurisdiction = take_string(doc, "jurisdiction")?;
+    let version = take_string_opt(doc, "version").unwrap_or_default();
+    let description = take_string_opt(doc, "description").unwrap_or_default();
 
-    let inputs = lower_params(&doc, &mut warnings);
-    let outputs = lower_outputs(&doc, &mut warnings);
+    let inputs = lower_params(doc, &mut warnings);
+    let outputs = lower_outputs(doc, &mut warnings);
     let steps_yaml = doc
         .get("steps")
         .and_then(YamlValue::as_sequence)
@@ -189,7 +237,7 @@ pub fn lower_yaml(yaml: &str) -> Result<LoweringReport, LoweringError> {
         .map(|s| s.to_string())
         .collect();
     validate_unique_step_ids(&known_ids)?;
-    let compensation_map = index_compensation(&doc, &known_ids, &mut warnings)?;
+    let compensation_map = index_compensation(doc, &known_ids, &mut warnings)?;
 
     let mut body: Vec<Statement> = Vec::new();
     let mut seen_ids = BTreeSet::new();

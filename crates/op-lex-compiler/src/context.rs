@@ -204,6 +204,32 @@ pub struct CompileCtx {
     pub binders: BTreeMap<String, OpType>,
 }
 
+/// An explicit authored purpose beside the existing compilation context.
+///
+/// The purpose is never inferred from the program name or jurisdiction.
+#[derive(Debug, Clone)]
+pub struct AuthoredCompileCtxV1 {
+    purpose: op_core::ProgramPurposeTag,
+    context: CompileCtx,
+}
+
+impl AuthoredCompileCtxV1 {
+    /// Attach a required authored purpose to an existing context.
+    pub fn new(purpose: op_core::ProgramPurposeTag, context: CompileCtx) -> Self {
+        Self { purpose, context }
+    }
+
+    /// Return the exact authored purpose.
+    pub fn purpose(&self) -> &op_core::ProgramPurposeTag {
+        &self.purpose
+    }
+
+    /// Return the existing compilation context.
+    pub fn context(&self) -> &CompileCtx {
+        &self.context
+    }
+}
+
 impl CompileCtx {
     /// Construct a context with the canonical prelude and default jurisdiction.
     pub fn with_canonical_prelude(program_name: &str) -> Self {

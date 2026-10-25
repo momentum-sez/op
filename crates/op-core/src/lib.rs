@@ -57,6 +57,7 @@ pub mod error;
 pub mod gas;
 pub mod host;
 pub mod parser;
+pub mod program;
 pub mod types;
 
 pub use ast::{
@@ -70,7 +71,8 @@ pub use effects::{check_effect_safety, EffectRow, EffectSafetyError};
 pub use error::OpError;
 pub use gas::{GasConfig, GasEstimate, GasMeter};
 pub use host::{HostError, HostOutcome, OpHost, PrimitiveCall};
-pub use parser::{parse_program, parse_step};
+pub use parser::{parse_program, parse_program_v1, parse_step};
+pub use program::{AuthoredOpProgramV1, ProgramPurposeTag, ProgramPurposeTagError};
 pub use types::{
     program_effect_row, typecheck_program, GasAnalysis, SafetyPredicateFailure, TypeCheckResult,
     TypeContext,

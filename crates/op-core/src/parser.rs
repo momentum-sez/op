@@ -11,6 +11,7 @@
 
 use crate::ast::{OpExpr, OpProgram, OpStep, Statement};
 use crate::error::OpError;
+use crate::program::AuthoredOpProgramV1;
 
 /// Parse an `OpProgram` from its JSON wire form.
 pub fn parse_program(source: &str) -> Result<OpProgram, OpError> {
@@ -18,6 +19,19 @@ pub fn parse_program(source: &str) -> Result<OpProgram, OpError> {
         line: e.line(),
         message: format!("JSON parse: {e}"),
     })?;
+    validate_program(&program)?;
+    Ok(program)
+}
+
+/// Parse a version-one authored envelope and check its actual inner program.
+pub fn parse_program_v1(source: &str) -> Result<AuthoredOpProgramV1, OpError> {
+    serde_json::from_str(source).map_err(|e| OpError::ParseError {
+        line: e.line(),
+        message: format!("JSON parse: {e}"),
+    })
+}
+
+pub(crate) fn validate_program(program: &OpProgram) -> Result<(), OpError> {
     if program.name.is_empty() {
         return Err(OpError::ParseError {
             line: 0,
@@ -31,8 +45,7 @@ pub fn parse_program(source: &str) -> Result<OpProgram, OpError> {
                 .to_string(),
         });
     }
-    validate_block(&program.body)?;
-    Ok(program)
+    validate_block(&program.body)
 }
 
 /// Parse a single `OpStep` from its JSON wire form.
