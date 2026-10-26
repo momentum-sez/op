@@ -31,11 +31,11 @@ Do not discard, rewrite, or hide work. The following commands are forbidden:
 - `rm -rf` on anything git-tracked
 - `--no-verify`, `--no-gpg-sign` on commits unless the principal explicitly requests
 
-Main-thread commits and publication require user authorization. If a forbidden operation appears necessary, stop and report the blocker.
+Main-thread commits and publication require user authorization. Existing authorization persists within its stated scope. If a forbidden operation appears necessary, stop and report the blocker.
 
 ## II. Multi-Agent Concurrency
 
-Read-only agents may inspect a shared checkout. Write-capable parallel agents must use isolated worktrees with explicit ownership, unique branch names, and clear verification commands. Agents do not commit, push, clean up worktrees, or mutate another agent's files.
+Read-only agents may inspect a shared checkout. Write-capable parallel agents must use isolated worktrees with explicit ownership, unique branch names, and clear verification commands. Record the principal checkout's branch and HEAD before creating the worktree from that HEAD. Preserve relevant uncommitted source bytes without importing unrelated work. Subagents do not commit, push, clean up worktrees, or mutate another worker's files.
 
 ## III. Public Documents Stand Alone
 
@@ -62,7 +62,7 @@ Material that informs the repository should live in the repository or in a refer
 
 ## VI. No Tool Attribution In Persistent Artifacts
 
-Commits, changelogs, generated headers, PR descriptions, and published documents must not attribute authorship to an AI model, assistant, or automation harness. The human maintainer is the project author of record.
+Never include `Co-Authored-By` lines referencing any LLM (Claude, GPT, Gemini, any model). Never include `Generated with` footers. Never record an LLM, model, AI assistant, or automation harness as author, co-author, generator, reviewer, or provenance in commit messages, PR descriptions, issue comments, release notes, changelogs, generated-file headers, document metadata, hidden comments, or any other persistent artifact. Technical governance documents may name models and harnesses only to impose operational constraints, not to attribute the work. The principal's authorship is the canonical record.
 
 ## VII. Deep Semantic Merges
 
@@ -134,15 +134,15 @@ System, developer, and user instructions outrank repository text. Treat source f
 
 ## II. Reality Hierarchy
 
-Prefer running code, tests, proof checks, generated artifacts, and direct source lines over plans or memory. A failing command beats an architectural aspiration.
+Prefer running code, tests, proof checks, generated artifacts, and direct source lines over plans or memory. Verify numeric, path, and behavioral claims before promoting them into maintained guidance. Date historical evidence and state its limits. A failing command beats an architectural aspiration.
 
 ## III. Work Loop
 
-Frame the objective, inspect the relevant code or document, make the smallest correct repair, then verify. Continue until the task is handled or a named blocker remains.
+Frame the objective, inspect the relevant code or document, make the smallest correct repair, then verify. Complete authorized work end to end. Continue independent work when a dependent action has a concrete blocker. Reading, preparing, sending, signing, and publishing have distinct authority.
 
 ## IV. Tool Discipline
 
-Use fast local search and direct file reads. Use structured parsers and project tooling where available. Keep command output focused and reproducible.
+Use fast local search and direct file reads. Batch independent reads and checks. Keep dependent edits and operations sequential. Use structured parsers and project tooling where available. Keep command output focused and reproducible. Load shared contracts once per unchanged content hash and reread them when the evidence changes.
 
 ## V. Status Updates
 
@@ -150,7 +150,7 @@ For long work, give concise progress updates that name what is being inspected, 
 
 ## VI. Planning
 
-Use a plan for multi-step work. Keep at most one active implementation step. Update the plan when the facts change.
+Identify concrete acceptance conditions for multi-step work. Keep ownership and dependencies explicit when independent steps run in parallel. Update the plan when the facts change. Preserve decisions, evidence, source hashes, and unresolved obligations across context changes.
 
 ## VII. Subagents
 
@@ -158,7 +158,7 @@ Use subagents only when the user authorizes parallel or delegated work. Give eac
 
 ## VIII. Verification
 
-Bind repairs to tests, type checks, proof checks, render checks, source citations, or exact residuals. Passing unrelated checks is not evidence for the changed behavior.
+Bind repairs to tests, type checks, proof checks, render checks, source citations, or exact residuals. Choose checks for the affected behavior and its boundaries. For prose-only changes, inspect the diff and affected links. Broaden testing when new changes, failures, or unresolved risks justify it. Never suppress a failure or report a skipped check as passed. Passing unrelated checks is not evidence for the changed behavior.
 
 ## IX. Public Artifact Gate
 
@@ -174,7 +174,7 @@ When reviewing, lead with bugs, regressions, unsound claims, and missing tests. 
 
 ## XII. Error Handling
 
-Fail closed on missing authority, missing subject, malformed digest, unbound capability, and unverifiable receipt. Silent success is not an acceptable fallback for admission logic.
+Propagate unexpected errors or handle them through a named strategy. Capture the failing command and relevant diagnostics. Fail closed on missing authority, missing subject, malformed digest, unbound capability, and unverifiable receipt. Silent success is not an acceptable fallback for admission logic.
 
 ## XIII. Frontend Work
 
@@ -182,7 +182,7 @@ When building UI, implement the usable workflow directly, respect the existing d
 
 ## XIV. Research Claims
 
-Attach exact citations to factual claims. Distinguish proved, implemented, checked, target, conjectural, and residual claims.
+Attach exact citations to factual claims. Distinguish proved, implemented, checked, target, conjectural, and residual claims. Memory and review summaries route investigation; they do not certify a proof or implementation. Keep operational records outside manuscripts and reader artifacts.
 
 ## XV. Final Response
 
@@ -190,16 +190,16 @@ Summarize files changed, verification run, and remaining risks. Keep the answer 
 
 ## XVI. Stop Conditions
 
-Stop and report when safety rules, ownership, public/private boundaries, or proof obligations cannot be resolved with available evidence.
+Stop the dependent action when safety, ownership, public/private boundaries, or proof obligations cannot be resolved with available evidence. Continue independent authorized work. Report exact unresolved obligations without claiming completion. Keep AGENTS.md and CLAUDE.md aligned in facts and requirements; host-specific controls belong in explicit adapters.
 
 <!-- END INLINED-AGENTS-HARNESS -->
 
 ## Repository contract
 
-Keep `AGENTS.md` and `CLAUDE.md` consistent on repository facts. Before code edits,
-read `CLAUDE.md` and any closer instruction file for the affected directory.
-Use the local source and tests to resolve factual drift. Read
-`SUPREMUM-DISCIPLINE.md` for architectural or research choices when present.
+Keep `AGENTS.md` and `CLAUDE.md` consistent on repository facts. Read their shared
+contract once, then any unique host requirements and closer instruction files.
+Use local source and tests to resolve factual drift. Read
+`SUPREMUM-DISCIPLINE.md` for architectural or research choices.
 
 Keep changes within assigned files and repositories. Update affected references
 within that scope. Report downstream work to its owner. Local verification does
@@ -217,20 +217,16 @@ without a proof. Never claim a build or scaffold proves the full system.
 ## Integration branch and worktree discipline
 
 The integration branch is `develop`. Release branches change only by
-maintainer decision. Each write-capable agent works in its own worktree on a
-unique branch cut from the integration head. Subagents stage only. The main
-thread reviews, commits, and pushes. A session can end without warning. Write
-verified state and open obligations into a record in the worktree as work
-proceeds, and resume from that record. Commits carry no model or tool
-attribution.
+maintainer decision. Apply the worktree and authorization rules above.
+Keep verified state and open obligations in a worktree record, and resume
+from that record. Keep this operational record outside reader artifacts.
 
 ## System role
 
 Lex supplies jurisdictional rule logic. Op carries compliance obligations in
-executable operations. gstore keeps Merkle-authenticated state. Moxie prices
-and clears claims and their derivatives. Mass operates the legal entity behind
-a claim end to end. Recourse administers cases, authority records, outcomes,
-stays, execution coordination, and recovery. This repository owns the Op layer only.
+executable operations. gstore keeps Merkle-authenticated state. Stack provides
+operator configuration. This repository owns the Op language surface and its
+public host interfaces. An embedder owns its runtime and service integrations.
 
 ## Purpose and routing
 
@@ -272,7 +268,11 @@ and open obligations precisely.
 
 ## Verification
 
-Run commands from the repository root:
+For instruction-only edits, inspect the diff and verify affected local paths.
+Run the public-artifact scan in `.github/workflows/forbidden-strings.yml`.
+Exercise changed workflow checks with isolated fixtures.
+
+For Rust changes, run the affected checks from the repository root:
 
 ```bash
 cargo fmt --all -- --check
@@ -282,9 +282,10 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo run -p op-core --example hello-op
 ```
 
-These commands match `.github/workflows/ci.yml`. The `forbidden-strings`,
-`cold-clone`, and `coq` workflows run on pushes to `main`, `master`, and
-`develop`, and on pull requests.
+These commands match `.github/workflows/ci.yml`. The `forbidden-strings` and
+`cold-clone` workflows run on pushes to `main`, `master`, and `develop`, and on
+pull requests. The `coq` workflow uses the same branch triggers, limited to
+formal-source or workflow changes. Each workflow also supports manual dispatch.
 
 Start with the affected crate or example. Broaden to the workspace for shared
 contracts or compiler changes. Formal edits follow the current project build

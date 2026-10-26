@@ -18,6 +18,15 @@ jobs:
       - name: scan for closed-repository references
         run: |
           set -euo pipefail
+          scan_matches() {
+            local scan_status=0
+            "$@" || scan_status=$?
+            if [ "$scan_status" -gt 1 ]; then
+              printf 'Scan failed with exit status %s\n' "$scan_status" >&2
+              return "$scan_status"
+            fi
+            return 0
+          }
           patterns=(
             '/Users/[^/]+/'
             '/home/[^/]+/'
@@ -28,12 +37,9 @@ jobs:
           )
           fail=0
           for p in "${patterns[@]}"; do
-            matches=$(git grep -nE "$p" -- \
-              ':(exclude)CLAUDE.md' \
-              ':(exclude)SUPREMUM-DISCIPLINE.md' \
+            matches=$(scan_matches git grep -nE "$p" -- \
               ':(exclude).github/workflows/forbidden-strings.yml' \
-              ':(exclude)Cargo.lock' \
-              || true)
+              ':(exclude)Cargo.lock')
             if [ -n "$matches" ]; then
               echo "::error::forbidden-strings matched pattern: $p"
               echo "$matches"
@@ -46,11 +52,12 @@ jobs:
             echo "See CLAUDE.md public-artifact hygiene policy."
             exit 1
           fi
-          non_whitelist=$(git grep -nE 'https://github\.com/|git@github\.com:' -- \
+          github_urls=$(scan_matches git grep -nEo \
+            '(https?://github\.com/|git@github\.com:)[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+' -- \
             ':(exclude).github/workflows/forbidden-strings.yml' \
-            ':(exclude)Cargo.lock' \
-            | grep -Ev 'github\.com[/:]momentum-sez/(lex|op|gstore|stack)(\.git)?([/#?[:space:])>]|$)' \
-            || true)
+            ':(exclude)Cargo.lock')
+          non_whitelist=$(printf '%s\n' "$github_urls" | scan_matches grep -Ev \
+            ':[0-9]+:(https?://github\.com/|git@github\.com:)momentum-sez/(lex|op|gstore|stack)(\.git)?$')
           if [ -n "$non_whitelist" ]; then
             echo "::error::non-whitelisted GitHub repository URL"
             echo "$non_whitelist"

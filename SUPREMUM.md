@@ -320,15 +320,15 @@ The Rust workspace has four crates:
   `case_sanctions`, `case_fill`), with the lift function `lift_value` and
   an admissibility checker.
 
-The executable inventory and expected test counts are defined by
-`REPRODUCIBILITY.md`. Benchmark harnesses exist in the workspace; any
-published performance table is a measured snapshot and not a formal claim.
+`Cargo.toml` defines workspace membership. `REPRODUCIBILITY.md` gives build,
+test, example, and benchmark commands. Record test totals from the selected
+revision. Benchmark results in `docs/benchmarks.md` are measured snapshots.
 
-An initial release is tagged. GitHub Actions CI runs Rust and Rocq
-pipelines on every push. The workspace compiles standalone from a cold
-clone with no path dependencies on sibling checkouts; pinned toolchain at
-`rust-toolchain.toml`. The benchmark table above is reproducible with the
-commands in `REPRODUCIBILITY.md` and `docs/benchmarks.md`.
+The repository has a `v0.1.0` tag. `.github/workflows/` defines the Rust,
+cold-clone, public-artifact, and Rocq checks. Rocq CI checks two named files
+when formal sources or its workflow change. The full formal build uses
+`formal/coq/Makefile` and `_CoqProject`. The workspace has no sibling path
+dependencies. `rust-toolchain.toml` pins its Rust toolchain.
 
 ## 9. Prior art
 

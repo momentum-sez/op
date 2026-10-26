@@ -1,6 +1,8 @@
 # CLAUDE.md — op
 
 > **This public repository carries its agent rules inline.** The block below is a public-safe export of the project-wide operating discipline, so external clones are self-contained and do not depend on private paths or internal repositories.
+>
+> Read `AGENTS.md` for the shared execution contract and local requirements. Skip unchanged invariant text already read. Keep both roots substantively aligned.
 
 ---
 
@@ -27,11 +29,11 @@ Do not discard, rewrite, or hide work. The following commands are forbidden:
 - `rm -rf` on anything git-tracked
 - `--no-verify`, `--no-gpg-sign` on commits unless the principal explicitly requests
 
-Main-thread commits and publication require user authorization. If a forbidden operation appears necessary, stop and report the blocker.
+Main-thread commits and publication require user authorization. Existing authorization persists within its stated scope. If a forbidden operation appears necessary, stop and report the blocker.
 
 ## II. Multi-Agent Concurrency
 
-Read-only agents may inspect a shared checkout. Write-capable parallel agents must use isolated worktrees with explicit ownership, unique branch names, and clear verification commands. Agents do not commit, push, clean up worktrees, or mutate another agent's files.
+Read-only agents may inspect a shared checkout. Write-capable parallel agents must use isolated worktrees with explicit ownership, unique branch names, and clear verification commands. Record the principal checkout's branch and HEAD before creating the worktree from that HEAD. Preserve relevant uncommitted source bytes without importing unrelated work. Subagents do not commit, push, clean up worktrees, or mutate another worker's files.
 
 ## III. Public Documents Stand Alone
 
@@ -58,7 +60,7 @@ Material that informs the repository should live in the repository or in a refer
 
 ## VI. No Tool Attribution In Persistent Artifacts
 
-Commits, changelogs, generated headers, PR descriptions, and published documents must not attribute authorship to an AI model, assistant, or automation harness. The human maintainer is the project author of record.
+Never include `Co-Authored-By` lines referencing any LLM (Claude, GPT, Gemini, any model). Never include `Generated with` footers. Never record an LLM, model, AI assistant, or automation harness as author, co-author, generator, reviewer, or provenance in commit messages, PR descriptions, issue comments, release notes, changelogs, generated-file headers, document metadata, hidden comments, or any other persistent artifact. Technical governance documents may name models and harnesses only to impose operational constraints, not to attribute the work. The principal's authorship is the canonical record.
 
 ## VII. Deep Semantic Merges
 
@@ -124,10 +126,10 @@ Nineteen rules govern code-writing work. Apply judgment in proportion to risk.
 
 ## Repository contract
 
-Keep `AGENTS.md` and `CLAUDE.md` consistent on repository facts. Before code edits,
-read `CLAUDE.md` and any closer instruction file for the affected directory.
-Use the local source and tests to resolve factual drift. Read
-`SUPREMUM-DISCIPLINE.md` for architectural or research choices when present.
+Keep `AGENTS.md` and `CLAUDE.md` consistent on repository facts. Read their shared
+contract once, then any unique host requirements and closer instruction files.
+Use local source and tests to resolve factual drift. Read
+`SUPREMUM-DISCIPLINE.md` for architectural or research choices.
 
 Keep changes within assigned files and repositories. Update affected references
 within that scope. Report downstream work to its owner. Local verification does
@@ -145,20 +147,16 @@ without a proof. Never claim a build or scaffold proves the full system.
 ## Integration branch and worktree discipline
 
 The integration branch is `develop`. Release branches change only by
-maintainer decision. Each write-capable agent works in its own worktree on a
-unique branch cut from the integration head. Subagents stage only. The main
-thread reviews, commits, and pushes. A session can end without warning. Write
-verified state and open obligations into a record in the worktree as work
-proceeds, and resume from that record. Commits carry no model or tool
-attribution.
+maintainer decision. Apply the worktree and authorization rules above.
+Keep verified state and open obligations in a worktree record, and resume
+from that record. Keep this operational record outside reader artifacts.
 
 ## System role
 
 Lex supplies jurisdictional rule logic. Op carries compliance obligations in
-executable operations. gstore keeps Merkle-authenticated state. Moxie prices
-and clears claims and their derivatives. Mass operates the legal entity behind
-a claim end to end. Recourse administers cases, authority records, outcomes,
-stays, execution coordination, and recovery. This repository owns the Op layer only.
+executable operations. gstore keeps Merkle-authenticated state. Stack provides
+operator configuration. This repository owns the Op language surface and its
+public host interfaces. An embedder owns its runtime and service integrations.
 
 ## Purpose and routing
 
@@ -200,7 +198,11 @@ and open obligations precisely.
 
 ## Verification
 
-Run commands from the repository root:
+For instruction-only edits, inspect the diff and verify affected local paths.
+Run the public-artifact scan in `.github/workflows/forbidden-strings.yml`.
+Exercise changed workflow checks with isolated fixtures.
+
+For Rust changes, run the affected checks from the repository root:
 
 ```bash
 cargo fmt --all -- --check
@@ -210,9 +212,10 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo run -p op-core --example hello-op
 ```
 
-These commands match `.github/workflows/ci.yml`. The `forbidden-strings`,
-`cold-clone`, and `coq` workflows run on pushes to `main`, `master`, and
-`develop`, and on pull requests.
+These commands match `.github/workflows/ci.yml`. The `forbidden-strings` and
+`cold-clone` workflows run on pushes to `main`, `master`, and `develop`, and on
+pull requests. The `coq` workflow uses the same branch triggers, limited to
+formal-source or workflow changes. Each workflow also supports manual dispatch.
 
 Start with the affected crate or example. Broaden to the workspace for shared
 contracts or compiler changes. Formal edits follow the current project build

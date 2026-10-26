@@ -1,7 +1,7 @@
 # Getting Started with Op
 
-A cold-clone-to-first-program walk. Five minutes on a machine with Rust
-installed.
+Build the workspace, run its tests, and inspect an Op program through the
+public host interface. Install Rust and Cargo before starting.
 
 ## 1. Clone and build
 
@@ -11,8 +11,8 @@ cd op
 cargo check --workspace
 ```
 
-`cargo check` succeeds on a cold clone with no external path
-dependencies. Compile time on a warm machine is under ten seconds.
+The workspace has no external path dependencies. The pinned toolchain and
+initial dependency downloads can affect build time.
 
 ## 2. Run the tests
 
@@ -20,10 +20,10 @@ dependencies. Compile time on a warm machine is under ten seconds.
 cargo test --workspace
 ```
 
-Expect 48 tests across the three crates (`op-core`, `op-compiler`,
-`op-stdlib`). Unit tests cover the type checker, the effect-safety
-analyzer, linear / locked resource discipline, YAML→Op lowering, content
-addressing, and the canonical primitive corpus.
+The workspace contains four crates: `op-core`, `op-compiler`, `op-stdlib`,
+and `op-lex-compiler`. All selected tests must pass. Use the command output
+for current totals and ignored tests. Tests cover type checking, effect safety,
+resource use, lowering, the primitive corpus, and Lex compilation.
 
 ## 3. Run the instant-demo example
 
@@ -31,33 +31,18 @@ addressing, and the canonical primitive corpus.
 cargo run --example hello-op -p op-core
 ```
 
-Output (approximately):
+The example constructs an `OpProgram` and checks its declared effects.
+The `gate` step supplies the sanctions check before the `activate` step's
+state-write effect. The checker also computes a static structural gas bound.
 
-```
-program      : hello.op  (jurisdiction: _default)
-typecheck    : OK  (composed effects: [SovereignWrite, SanctionsCheck])
-gas bound    : 20 structural units
-step gate      : screening.sanctions -> COMPLETED
-step activate  : update.entity_status -> COMPLETED
-verdict      : ADMIT  (2 steps executed, trace is replayable)
-```
+The example then calls each primitive through `NoopHost`, which returns a
+deterministic JSON record. Its final line reports an illustrative walk.
+The walk does not meter gas, apply a real state mutation, or produce a signed
+proof or admission verdict.
 
-What happened, top to bottom:
-
-1. An `OpProgram` was constructed programmatically.
-2. The type checker composed the effect row across steps and verified
-   the sanctions-dominance rule — the `gate` step carrying
-   `sanctions_check` dominates the downstream `activate` step carrying
-   `sovereign_write`.
-3. The structural gas bound was computed from the program shape.
-4. Each step's primitive was invoked through `NoopHost` (an echo host
-   that returns a deterministic JSON record). Same program + same
-   inputs → same trace on every replay.
-5. A compliance-carrying verdict was rendered.
-
-The entire example is 60 lines of Rust at
-`crates/op-core/examples/hello-op.rs`. Read it top-to-bottom alongside
-this page.
+Read `crates/op-core/examples/hello-op.rs` alongside its output.
+Run `cargo test -p op-core --example hello-op` to check the example's acceptance
+conditions.
 
 ## 4. Run the compliance-gate example
 

@@ -1,13 +1,13 @@
 # Reproducibility
 
-This document specifies the exact procedure for reproducing every executable
-claim in this repository. A reviewer with the listed hardware and toolchain
-should obtain bit-identical or functionally-identical results.
+This guide gives the build, test, example, and benchmark commands for Op.
+Record the source commit, toolchain versions, command, and complete output for
+each reproduction. Test results apply to that source revision and environment.
 
 ## Repository
 
 - URL: <https://github.com/momentum-sez/op>
-- Branch: `main`
+- Integration branch: `develop`
 - License: Apache-2.0 (`LICENSE`)
 
 ## Clone
@@ -46,9 +46,9 @@ Coq mechanization is checked against:
 cargo test --workspace
 ```
 
-Expected: `97` tests pass across the four crates `op-core`, `op-compiler`,
-`op-stdlib`, `op-lex-compiler`. Zero failures. Doc-tests contribute one
-`ignored` entry from `op_lex_compiler` (signature-only).
+The workspace contains `op-core`, `op-compiler`, `op-stdlib`, and
+`op-lex-compiler`. All selected tests must pass. Record the totals and any
+ignored tests from the current command output.
 
 Integration test binaries include `compensation_runtime`, `meet_monotonicity`,
 `proof_bundle_determinism` (op-core); `golden_defeasible_tolling`,
@@ -63,7 +63,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all -- --check
 ```
 
-Expected: both exit `0` with no output.
+Expected: both exit `0` without formatting or lint failures.
 
 ### Hello-op example
 
@@ -71,18 +71,13 @@ Expected: both exit `0` with no output.
 cargo run --example hello-op -p op-core
 ```
 
-Expected output (order and formatting are stable):
+The example must type-check and visit the `gate` and `activate` steps through
+`NoopHost`. Its output includes the composed effects and a static gas bound.
+The final line identifies an illustrative walk. The example does not meter gas,
+perform a real state mutation, or produce a signed proof.
 
-```
-program      : hello.op  (jurisdiction: _default)
-typecheck    : OK  (composed effects: [SovereignWrite, SanctionsCheck])
-gas bound    : 20 structural units
-step gate      : screening.sanctions -> COMPLETED
-step activate  : update.entity_status -> COMPLETED
-verdict      : ADMIT  (2 steps executed, trace is replayable)
-```
-
-The example source is `crates/op-core/examples/hello-op.rs`.
+Check the current output against `crates/op-core/examples/hello-op.rs`.
+Run its acceptance test with `cargo test -p op-core --example hello-op`.
 
 ### Coq mechanization
 
@@ -91,9 +86,11 @@ cd formal/coq
 make
 ```
 
-The default `Makefile` target invokes `coq_makefile -f _CoqProject` and
-`coqc` each listed `.v` file under Rocq Prover `9.1.1`. A CI job runs the
-same build in the `rocq/rocq:9.1` container on every push.
+The default `Makefile` target generates `CoqMakefile` from `_CoqProject`
+and builds the listed `.v` files. The Coq CI workflow uses `rocq/rocq:9.1`.
+It checks `OpCore.v` and `CompilationSoundness.v`.
+Its push and pull-request triggers filter for formal-source or workflow changes.
+Run the full local build for changes that affect other formal files.
 
 Current Qed-closed state (see the companion Op paper §8.5 for the
 authoritative inventory and Axiom/Parameter disclosure):
@@ -197,6 +194,6 @@ has no network-dependent tests.
 
 ## Issues
 
-If `cargo test --workspace` reports a count other than `97` passed, or if any
-example deviates from the output above, please open an issue at the repository
-with the full `rustc --version`, `cargo --version`, and platform information.
+Report failed tests, unexpected skips, or changed example behavior with the
+exact command, source commit, complete diagnostics, and platform information.
+Include `rustc --version` and `cargo --version` output.

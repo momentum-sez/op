@@ -210,10 +210,10 @@ time. Lex lives at <https://github.com/momentum-sez/lex>.
 ## Reproducibility
 
 See [`REPRODUCIBILITY.md`](REPRODUCIBILITY.md) for the exact toolchain pin,
-expected test counts, example outputs, and hardware budgets. The repository
-ships with a pinned Rust toolchain (`rust-toolchain.toml`), GitHub Actions
-CI for Rust and Rocq, and a self-contained workspace that compiles from a
-cold clone without sibling checkouts.
+test acceptance conditions, example behavior, and timing observations.
+The repository pins its Rust toolchain in `rust-toolchain.toml`.
+GitHub Actions defines Rust and Rocq checks. The `cold-clone` workflow checks
+standalone builds and tests without sibling checkouts.
 
 ## Contributing
 
