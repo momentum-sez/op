@@ -14,7 +14,7 @@ rust-version = "1.93"
 license = "Apache-2.0"
 
 [workspace.dependencies]
-mez-canonical = { git = "https://github.com/momentum-sez/lex.git", rev = "45407cffea682bb4c315a200eca3e1484a8e9a1f" }
+mez-canonical = { git = "https://github.com/momentum-sez/lex.git", rev = "8d4056f3ba86cbded2a20e46edfe9a8b71f06929" }
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
